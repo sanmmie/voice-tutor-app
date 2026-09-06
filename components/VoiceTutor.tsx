@@ -37,6 +37,10 @@ export function VoiceTutor() {
     };
   }, []);
 
+  const retryAuth = () => {
+    window.location.reload();
+  };
+
   if (authLoading) {
     return (
       <div className="font-mono text-terminal-muted" role="status">
@@ -51,6 +55,9 @@ export function VoiceTutor() {
         {authError && (
           <p className="mb-4 text-center text-sm text-red-400" role="alert">
             Could not check your account. You can still try signing in.
+            <button type="button" onClick={retryAuth} className="ml-2 underline hover:text-red-300">
+              Retry
+            </button>
           </p>
         )}
         <AuthPanel onAuthenticated={(authenticatedUser) => {

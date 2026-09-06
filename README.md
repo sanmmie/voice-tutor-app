@@ -48,6 +48,9 @@ ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
 SESSION_SECRET=generate-a-long-random-secret
 UPSTASH_REDIS_REST_URL=https://your-database.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
+NEXT_PUBLIC_TUTOR_SYSTEM_PROMPT=You are a patient, encouraging coding and math mentor.
+NEXT_PUBLIC_TUTOR_GREETING=Hi there! I am your voice tutor. What would you like to learn today?
+NEXT_PUBLIC_TUTOR_VOICE=michael
 ```
 
 Get your key from [assemblyai.com/dashboard/api-keys](https://www.assemblyai.com/dashboard/api-keys).
@@ -77,6 +80,7 @@ npm run build
 - `/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, and `/api/auth/me` manage account identity and sessions.
 - `/api/token` requires an authenticated account and is limited to 10 requests per IP per minute.
 - `/api/tool` requires an authenticated account and same-origin requests, and is limited to 60 requests per user per minute.
+- Tool execution is capped at five seconds; Wikipedia lookups time out after four seconds, and math expressions are bounded to prevent runaway evaluation.
 - API requests emit structured JSON logs with request ID, route, status, duration, and client IP for ingestion by Vercel Logs or another centralized logging provider.
 - Configure alerts on `/api/health` 5xx responses, elevated authentication or tool `429` responses, and upstream token failures.
 ## Project Structure
@@ -116,6 +120,7 @@ This project uses the official [AssemblyAI Voice Agent API](https://www.assembly
 - Inline `session.update` configuration supplies the tutor prompt, greeting, turn detection, keyterms, audio formats, and JSON-Schema function tools.
 - Client-side function tools run through the authenticated `/api/tool` route and return `tool.result` only after the current `reply.done` event.
 - `session.end` is sent before teardown to avoid the billable reconnect grace period.
+- If the WebSocket drops unexpectedly, the client fetches a fresh token and attempts `session.resume` within the provider’s 30-second recovery window. Fatal authentication/protocol closes are not retried.
 - Microphone echo cancellation remains enabled, server-side noise suppression is preferred, and audio is resampled for Firefox and Safari compatibility.
 
 The hackathon accepts either the Voice Agent API or the Realtime Speech-to-Text API. This submission uses the Voice Agent API because it provides the complete speech-to-text, LLM routing, voice output, turn-taking, and tool-calling flow in one connection.

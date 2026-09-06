@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ToolCall, ToolCallUI, TranscriptMessage, VoiceAgentState } from '@/lib/types';
 import { toolDefinitions } from '@/lib/tools';
+import { agentConfig } from '@/lib/agent-config';
 import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
 
 const SAMPLE_RATE = 24000;
@@ -33,6 +34,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const nextPlayTimeRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const pendingToolResultsRef = useRef<Map<string, Promise<{ result: unknown; isError: boolean }>>>(new Map());
+  const reconnectTimerRef = useRef<number | null>(null);
+  const endingRef = useRef(false);
+  const connectRef = useRef<(token: string, resume?: boolean) => Promise<void>>();
 
   const setStatus = useCallback((status: VoiceAgentState['status']) => {
     setState((prev) => ({ ...prev, status }));
@@ -110,7 +114,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, [processQueue]);
 
   // --- Connect ---
-  const connect = useCallback(async (token: string) => {
+  const connect = useCallback(async (token: string, resume = false) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
@@ -123,15 +127,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     ws.onopen = () => {
       setStatus('connected');
-      // Send session.update immediately
-      ws.send(
-        JSON.stringify({
+      ws.send(JSON.stringify(resume && sessionIdRef.current
+        ? { type: 'session.resume', session_id: sessionIdRef.current }
+        : {
           type: 'session.update',
           session: {
-            system_prompt:
-              "You are a patient, encouraging coding and math mentor. You explain concepts step-by-step, use analogies, and guide the user to the answer rather than giving it away immediately. You're friendly and conversational. When the user asks a math question, use the calculate tool. When they ask about a programming concept, use search_docs first, then get_code_example if they want to see code.",
-            greeting:
-              "Hi there! I'm your voice tutor. I can help with Python, algorithms, web development, or math. What would you like to learn today?",
+            system_prompt: agentConfig.systemPrompt,
+            greeting: agentConfig.greeting,
             input: {
               format: { encoding: 'audio/pcm' },
               keyterms: [
@@ -160,13 +162,12 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
               },
             },
             output: {
-              voice: 'michael',
+              voice: agentConfig.voice,
               format: { encoding: 'audio/pcm' },
             },
             tools: toolDefinitions,
           },
-        })
-      );
+        }));
     };
 
     ws.onmessage = async (event) => {
@@ -178,6 +179,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           sessionIdRef.current = data.session_id;
           setState((prev) => ({ ...prev, sessionId: data.session_id }));
           setStatus('recording');
+          break;
+
+        case 'session.ended':
+          endingRef.current = true;
           break;
 
         case 'transcript.user':
@@ -264,6 +269,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     ws.onclose = (event) => {
       setStatus('disconnected');
+      wsRef.current = null;
+      if (!endingRef.current && sessionIdRef.current && event.code !== 1008 && event.code !== 1000) {
+        reconnectTimerRef.current = window.setTimeout(async () => {
+          try {
+            const response = await fetch('/api/token');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Reconnect failed');
+            await connectRef.current?.(data.token, true);
+          } catch {
+            setState((prev) => ({ ...prev, error: 'Connection lost. Please restart the session.' }));
+            setStatus('error');
+          }
+        }, 1000);
+      }
       if (event.code === 1008) {
         setState((prev) => ({ ...prev, error: 'Authentication failed. Check your token.' }));
       } else if (event.code !== 1000) {
@@ -276,6 +295,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       setState((prev) => ({ ...prev, error: 'WebSocket error occurred.' }));
     };
   }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus]);
+
+  connectRef.current = connect;
 
   // --- Start Microphone ---
   const startMicrophone = useCallback(async () => {
@@ -348,6 +369,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
   // --- Disconnect ---
   const disconnect = useCallback(() => {
+    endingRef.current = true;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     // Close WebSocket
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
@@ -388,6 +414,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
   // --- Initiate session (fetch token, connect, start mic) ---
   const startSession = useCallback(async () => {
+    endingRef.current = false;
     try {
       const res = await fetch('/api/token');
       const data = await res.json();
