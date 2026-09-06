@@ -120,6 +120,7 @@ This project uses the official [AssemblyAI Voice Agent API](https://www.assembly
 - Inline `session.update` configuration supplies the tutor prompt, greeting, turn detection, keyterms, audio formats, and JSON-Schema function tools.
 - Client-side function tools run through the authenticated `/api/tool` route and return `tool.result` only after the current `reply.done` event.
 - `session.end` is sent before teardown to avoid the billable reconnect grace period.
+- Intentional teardown waits for `session.ended` before closing the socket, with a two-second fallback for an unresponsive connection.
 - If the WebSocket drops unexpectedly, the client fetches a fresh token and attempts `session.resume` within the provider’s 30-second recovery window. Fatal authentication/protocol closes are not retried.
 - Microphone echo cancellation remains enabled, server-side noise suppression is preferred, and audio is resampled for Firefox and Safari compatibility.
 

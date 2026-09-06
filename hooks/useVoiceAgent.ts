@@ -35,6 +35,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const sessionIdRef = useRef<string | null>(null);
   const pendingToolResultsRef = useRef<Map<string, Promise<{ result: unknown; isError: boolean }>>>(new Map());
   const reconnectTimerRef = useRef<number | null>(null);
+  const endTimerRef = useRef<number | null>(null);
   const endingRef = useRef(false);
   const connectRef = useRef<(token: string, resume?: boolean) => Promise<void>>();
 
@@ -183,6 +184,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
         case 'session.ended':
           endingRef.current = true;
+          if (endTimerRef.current !== null) {
+            window.clearTimeout(endTimerRef.current);
+            endTimerRef.current = null;
+          }
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.close();
+          }
           break;
 
         case 'transcript.user':
@@ -378,7 +386,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'session.end' }));
-        wsRef.current.close();
+        const socket = wsRef.current;
+        endTimerRef.current = window.setTimeout(() => {
+          if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+            socket.close();
+          }
+          endTimerRef.current = null;
+        }, 2000);
       }
       wsRef.current = null;
     }
