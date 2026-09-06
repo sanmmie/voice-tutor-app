@@ -36,7 +36,12 @@ export async function POST(request: NextRequest) {
       return apiResponse(request, '/api/tool', requestId, 400, startedAt, { error: 'Invalid tool arguments' });
     }
 
-    const result = await executeTool(name, args ?? {});
+    const result = await Promise.race([
+      executeTool(name, args ?? {}),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Tool execution timed out')), 5000);
+      }),
+    ]);
     return apiResponse(request, '/api/tool', requestId, 200, startedAt, { result });
   } catch {
     return apiResponse(request, '/api/tool', requestId, 400, startedAt, { error: 'Tool execution failed' });

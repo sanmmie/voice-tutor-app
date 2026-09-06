@@ -92,7 +92,11 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
   switch (name) {
     case 'calculate': {
       const { expression } = args;
-      if (!expression) throw new Error('Missing expression');
+      if (typeof expression !== 'string' || !expression.trim()) throw new Error('Missing expression');
+      if (expression.length > 500) throw new Error('Expression is too long');
+      if (/;|:=|import|createUnit|derivative|simplify|parse|evaluate/i.test(expression)) {
+        throw new Error('Expression contains an unsupported operation');
+      }
       try {
         const result = evaluate(expression);
         return { expression, result };
@@ -103,10 +107,11 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
     case 'search_docs': {
       const { query } = args;
-      if (!query) throw new Error('Missing query');
+      if (typeof query !== 'string' || !query.trim()) throw new Error('Missing query');
+      if (query.length > 200) throw new Error('Search query is too long');
       const encoded = encodeURIComponent(query);
       const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encoded}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
       if (!res.ok) {
         if (res.status === 404) {
           return { query, found: false, message: `No Wikipedia article found for "${query}".` };
