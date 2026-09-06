@@ -1,10 +1,14 @@
 import type { Metadata } from 'next';
 import './globals.css';
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
   title: 'Voice Tutor — AssemblyAI LabLab',
   description: 'A voice-based coding and math tutor powered by AssemblyAI Voice Agent API',
-  viewport: 'width=device-width, initial-scale=1',
 };
 
 export default function RootLayout({

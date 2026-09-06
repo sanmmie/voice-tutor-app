@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ToolCall, ToolCallUI, TranscriptMessage, VoiceAgentState } from '@/lib/types';
-import { float32ToInt16, chunkPCM16, int16ToBase64 } from '@/utils/audio';
+import { toolDefinitions } from '@/lib/tools';
+import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
 
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
@@ -13,6 +14,7 @@ interface UseVoiceAgentOptions {
 }
 
 export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
+  const { onStatusChange, onTranscript, onToolCall } = options;
   const [state, setState] = useState<VoiceAgentState>({
     status: 'idle',
     sessionId: null,
@@ -30,57 +32,49 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const isPlayingRef = useRef(false);
   const nextPlayTimeRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const pendingToolResultsRef = useRef<Map<string, Promise<{ result: unknown; isError: boolean }>>>(new Map());
 
-  const setStatus = (status: VoiceAgentState['status']) => {
+  const setStatus = useCallback((status: VoiceAgentState['status']) => {
     setState((prev) => ({ ...prev, status }));
-    options.onStatusChange?.(status);
-  };
+    onStatusChange?.(status);
+  }, [onStatusChange]);
 
-  const addUserTranscript = (text: string, isFinal: boolean) => {
+  const addUserTranscript = useCallback((text: string, isFinal: boolean) => {
     const msg: TranscriptMessage = { type: 'transcript.user', text, timestamp: Date.now(), isFinal };
     setState((prev) => ({
       ...prev,
       userTranscripts: [...prev.userTranscripts, msg],
     }));
-    options.onTranscript?.(msg);
-  };
+    onTranscript?.(msg);
+  }, [onTranscript]);
 
-  const addAgentTranscript = (text: string) => {
+  const addAgentTranscript = useCallback((text: string) => {
     const msg: TranscriptMessage = { type: 'transcript.agent', text, timestamp: Date.now(), isFinal: true };
     setState((prev) => ({
       ...prev,
       agentTranscripts: [...prev.agentTranscripts, msg],
     }));
-    options.onTranscript?.(msg);
-  };
+    onTranscript?.(msg);
+  }, [onTranscript]);
 
-  const addToolCall = (call: ToolCallUI) => {
+  const addToolCall = useCallback((call: ToolCallUI) => {
     setState((prev) => ({
       ...prev,
       toolCalls: [...prev.toolCalls, call],
     }));
-    options.onToolCall?.(call);
-  };
+    onToolCall?.(call);
+  }, [onToolCall]);
 
-  const updateToolCallResult = (callId: string, result: any, status: 'success' | 'error' = 'success') => {
+  const updateToolCallResult = useCallback((callId: string, result: any, status: 'success' | 'error' = 'success') => {
     setState((prev) => ({
       ...prev,
       toolCalls: prev.toolCalls.map((tc) =>
         tc.call_id === callId ? { ...tc, result, status } : tc
       ),
     }));
-  };
-
-  // --- Audio Playback ---
-  const playAudioChunk = useCallback((base64Data: string) => {
-    const floatData = base64ToFloat32(base64Data);
-    audioQueueRef.current.push(floatData);
-    if (!isPlayingRef.current) {
-      isPlayingRef.current = true;
-      processQueue();
-    }
   }, []);
 
+  // --- Audio Playback ---
   const processQueue = useCallback(() => {
     if (!audioContextRef.current) return;
     const ctx = audioContextRef.current;
@@ -91,7 +85,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     const chunk = audioQueueRef.current.shift()!;
     const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
-    buffer.copyToChannel(chunk, 0);
+    buffer.getChannelData(0).set(chunk);
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -105,6 +99,15 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       processQueue();
     };
   }, []);
+
+  const playAudioChunk = useCallback((base64Data: string) => {
+    const floatData = base64ToFloat32(base64Data);
+    audioQueueRef.current.push(floatData);
+    if (!isPlayingRef.current) {
+      isPlayingRef.current = true;
+      processQueue();
+    }
+  }, [processQueue]);
 
   // --- Connect ---
   const connect = useCallback(async (token: string) => {
@@ -199,6 +202,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             audioQueueRef.current = [];
             isPlayingRef.current = false;
             nextPlayTimeRef.current = 0;
+            pendingToolResultsRef.current.clear();
+          } else {
+            for (const [callId, resultPromise] of pendingToolResultsRef.current) {
+              const toolResult = await resultPromise;
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'tool.result',
+                  call_id: callId,
+                  result: JSON.stringify(toolResult.result),
+                  is_error: toolResult.isError,
+                }));
+              }
+              pendingToolResultsRef.current.delete(callId);
+            }
           }
           break;
 
@@ -211,38 +228,29 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           };
           addToolCall(call);
 
-          // Execute the tool via the server API
-          try {
-            const res = await fetch('/api/tool', {
+          const resultPromise = (async () => {
+            try {
+              const res = await fetch('/api/tool', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name: data.name, args: data.arguments }),
-            });
-            const json = await res.json();
-            if (!res.ok) throw new Error(json.error || 'Tool execution failed');
-            updateToolCallResult(data.call_id, json.result, 'success');
-            // Send the result back to AssemblyAI
-            ws.send(
-              JSON.stringify({
-                type: 'tool.result',
-                call_id: data.call_id,
-                result: json.result,
-              })
-            );
-          } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : 'Tool failed';
-            updateToolCallResult(data.call_id, { error: errorMsg }, 'error');
-            ws.send(
-              JSON.stringify({
-                type: 'tool.result',
-                call_id: data.call_id,
-                result: { error: errorMsg },
-              })
-            );
-          }
+              });
+              const json = await res.json();
+              if (!res.ok) throw new Error(json.error || 'Tool execution failed');
+              updateToolCallResult(data.call_id, json.result, 'success');
+              return { result: json.result, isError: false };
+            } catch (err) {
+              const errorMsg = err instanceof Error ? err.message : 'Tool failed';
+              const result = { error: errorMsg };
+              updateToolCallResult(data.call_id, result, 'error');
+              return { result, isError: true };
+            }
+          })();
+          pendingToolResultsRef.current.set(data.call_id, resultPromise);
           break;
         }
 
+        case 'session.error':
         case 'error':
           setState((prev) => ({ ...prev, error: data.message || 'Unknown error' }));
           setStatus('error');
@@ -267,7 +275,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       setStatus('error');
       setState((prev) => ({ ...prev, error: 'WebSocket error occurred.' }));
     };
-  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult]);
+  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus]);
 
   // --- Start Microphone ---
   const startMicrophone = useCallback(async () => {
@@ -282,13 +290,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           sampleRate: SAMPLE_RATE,
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: false,
           autoGainControl: true,
         },
       });
       micStreamRef.current = stream;
 
-      const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      const ctx = new AudioContext();
       audioContextRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
 
@@ -299,7 +307,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
-        const int16 = float32ToInt16(inputData);
+        const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
+        const int16 = float32ToInt16(resampled);
         // Append to buffer
         const newBuffer = new Int16Array(pcmBuffer.length + int16.length);
         newBuffer.set(pcmBuffer);
@@ -335,7 +344,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, []);
+  }, [setStatus]);
 
   // --- Disconnect ---
   const disconnect = useCallback(() => {
@@ -375,7 +384,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       ...prev,
       sessionId: null,
     }));
-  }, []);
+  }, [setStatus]);
 
   // --- Initiate session (fetch token, connect, start mic) ---
   const startSession = useCallback(async () => {
@@ -392,7 +401,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, [connect, startMicrophone]);
+  }, [connect, startMicrophone, setStatus]);
 
   // Cleanup on unmount
   useEffect(() => {

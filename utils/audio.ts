@@ -8,6 +8,21 @@ export function float32ToInt16(float32Array: Float32Array): Int16Array {
   return int16Array;
 }
 
+export function resampleFloat32(data: Float32Array, inputRate: number, outputRate: number): Float32Array {
+  if (inputRate === outputRate) return data;
+  const outputLength = Math.max(1, Math.round(data.length * outputRate / inputRate));
+  const output = new Float32Array(outputLength);
+  const ratio = inputRate / outputRate;
+  for (let i = 0; i < outputLength; i++) {
+    const position = i * ratio;
+    const lower = Math.floor(position);
+    const upper = Math.min(lower + 1, data.length - 1);
+    const fraction = position - lower;
+    output[i] = data[lower] * (1 - fraction) + data[upper] * fraction;
+  }
+  return output;
+}
+
 // Convert base64 PCM16 to Float32 for playback
 export function base64ToFloat32(base64: string): Float32Array {
   const binary = atob(base64);

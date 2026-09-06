@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useVoiceAgent } from '@/hooks/useVoiceAgent';
+import { AuthPanel } from './AuthPanel';
 import { VoiceVisualizer } from './VoiceVisualizer';
 import { Controls } from './Controls';
 import { StatusBar } from './StatusBar';
@@ -8,7 +10,25 @@ import { TranscriptList } from './TranscriptList';
 import { ToolCallCard } from './ToolCallCard';
 
 export function VoiceTutor() {
+  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const { state, startSession, disconnect, isConnected, isRecording } = useVoiceAgent();
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => setUser(data?.user || null))
+      .catch(() => setUser(null))
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  if (authLoading) {
+    return <div className="font-mono text-terminal-muted">Loading account...</div>;
+  }
+
+  if (!user) {
+    return <AuthPanel onAuthenticated={setUser} />;
+  }
 
   const handleStart = () => {
     startSession();
@@ -25,11 +45,17 @@ export function VoiceTutor() {
         <h1 className="text-2xl font-mono font-bold text-terminal-accent">
           🧑‍🏫 Voice Tutor
         </h1>
-        <StatusBar
-          status={state.status}
-          error={state.error}
-          sessionId={state.sessionId}
-        />
+        <div className="flex items-center gap-4">
+          <span className="hidden text-xs text-terminal-muted sm:inline">{user.email}</span>
+          <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
+          <button
+            type="button"
+            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setUser(null); }}
+            className="text-xs text-terminal-muted hover:text-terminal-accent"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Visualizer */}
