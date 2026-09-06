@@ -12,22 +12,53 @@ import { ToolCallCard } from './ToolCallCard';
 export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(false);
   const { state, startSession, disconnect, isConnected, isRecording } = useVoiceAgent();
 
   useEffect(() => {
-    fetch('/api/auth/me')
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
+
+    fetch('/api/auth/me', { signal: controller.signal })
       .then(async (response) => response.ok ? response.json() : null)
       .then((data) => setUser(data?.user || null))
-      .catch(() => setUser(null))
-      .finally(() => setAuthLoading(false));
+      .catch(() => {
+        setUser(null);
+        setAuthError(true);
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        setAuthLoading(false);
+      });
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   if (authLoading) {
-    return <div className="font-mono text-terminal-muted">Loading account...</div>;
+    return (
+      <div className="font-mono text-terminal-muted" role="status">
+        Loading account...
+      </div>
+    );
   }
 
   if (!user) {
-    return <AuthPanel onAuthenticated={setUser} />;
+    return (
+      <div className="w-full">
+        {authError && (
+          <p className="mb-4 text-center text-sm text-red-400" role="alert">
+            Could not check your account. You can still try signing in.
+          </p>
+        )}
+        <AuthPanel onAuthenticated={(authenticatedUser) => {
+          setAuthError(false);
+          setUser(authenticatedUser);
+        }} />
+      </div>
+    );
   }
 
   const handleStart = () => {
