@@ -118,7 +118,21 @@ export async function destroySession(request: NextRequest, response: NextRespons
 
 export function isSameOrigin(request: NextRequest): boolean {
   const origin = request.headers.get('origin');
-  return !origin || origin === new URL(request.url).origin;
+  if (!origin) return true;
+
+  const requestOrigin = new URL(request.url).origin;
+  if (origin === requestOrigin) return true;
+
+  if (process.env.NODE_ENV !== 'production') {
+    const allowedDevOrigins = (process.env.DEV_ALLOWED_ORIGINS ||
+      'http://localhost:3000,http://127.0.0.1:3000,http://192.168.43.191:3000')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return allowedDevOrigins.includes(origin);
+  }
+
+  return false;
 }
 
 export function logApiRequest(

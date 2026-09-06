@@ -51,10 +51,12 @@ UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
 NEXT_PUBLIC_TUTOR_SYSTEM_PROMPT=You are a patient, encouraging coding and math mentor.
 NEXT_PUBLIC_TUTOR_GREETING=Hi there! I am your voice tutor. What would you like to learn today?
 NEXT_PUBLIC_TUTOR_VOICE=michael
+DEV_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://192.168.43.191:3000
 ```
 
 Get your key from [assemblyai.com/dashboard/api-keys](https://www.assemblyai.com/dashboard/api-keys).
 Create the Redis variables in an Upstash Redis database. Generate `SESSION_SECRET` with a password manager or `openssl rand -base64 32`. All four variables are required in production; the API fails closed when the security configuration is incomplete.
+`DEV_ALLOWED_ORIGINS` is only for local LAN testing. Keep it out of production and set it to the exact development origins you use.
 Users create accounts with an email address and a password between 12 and 128 characters. Passwords are hashed with bcrypt and are never returned or logged. Account records and revocable sessions are stored in Redis, so every production instance shares the same identity state.
 
 ### 3. Run Locally
