@@ -4,10 +4,11 @@ import { toolDefinitions } from '@/lib/tools';
 import { agentConfig } from '@/lib/agent-config';
 import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
 
+const DEBUG = false; // flip to true to log mic-capture heartbeats + WS events
+
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
 const CHUNK_SAMPLES = (SAMPLE_RATE * CHUNK_MS) / 1000; // 1200
-const MAX_AUDIO_QUEUE_CHUNKS = 10;
 
 interface UseVoiceAgentOptions {
   onTranscript?: (msg: TranscriptMessage) => void;
@@ -30,8 +31,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<Float32Array[]>([]);
-  const isPlayingRef = useRef(false);
+  const silentGainRef = useRef<GainNode | null>(null);
+  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const pendingToolResultsRef = useRef<Map<string, Promise<{ result: unknown; isError: boolean }>>>(new Map());
@@ -40,6 +41,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const endingRef = useRef(false);
   const connectRef = useRef<(token: string, resume?: boolean) => Promise<void>>();
 
+  const log = useCallback((...args: unknown[]) => {
+    if (DEBUG) console.log('[VoiceTutor]', ...args);
+  }, []);
+
   const setStatus = useCallback((status: VoiceAgentState['status']) => {
     setState((prev) => ({ ...prev, status }));
     onStatusChange?.(status);
@@ -47,27 +52,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
   const addUserTranscript = useCallback((text: string, isFinal: boolean) => {
     const msg: TranscriptMessage = { type: 'transcript.user', text, timestamp: Date.now(), isFinal };
-    setState((prev) => ({
-      ...prev,
-      userTranscripts: [...prev.userTranscripts, msg],
-    }));
+    setState((prev) => ({ ...prev, userTranscripts: [...prev.userTranscripts, msg] }));
     onTranscript?.(msg);
   }, [onTranscript]);
 
   const addAgentTranscript = useCallback((text: string) => {
     const msg: TranscriptMessage = { type: 'transcript.agent', text, timestamp: Date.now(), isFinal: true };
-    setState((prev) => ({
-      ...prev,
-      agentTranscripts: [...prev.agentTranscripts, msg],
-    }));
+    setState((prev) => ({ ...prev, agentTranscripts: [...prev.agentTranscripts, msg] }));
     onTranscript?.(msg);
   }, [onTranscript]);
 
   const addToolCall = useCallback((call: ToolCallUI) => {
-    setState((prev) => ({
-      ...prev,
-      toolCalls: [...prev.toolCalls, call],
-    }));
+    setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, call] }));
     onToolCall?.(call);
   }, [onToolCall]);
 
@@ -81,98 +77,61 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, []);
 
   // --- Audio Playback ---
-  // FIX #1: Drain the entire queue in one pass and chain chunks back-to-back
-  // via nextPlayTimeRef. Previously, each chunk scheduled one-at-a-time from
-  // the previous chunk's onended callback, and the `ctx.currentTime + 0.03`
-  // lookahead always won the Math.max — inserting ~40ms of silence between
-  // every 50ms chunk and halving the effective playback speed.
-  const processQueue = useCallback(() => {
-    if (!audioContextRef.current) return;
-    const ctx = audioContextRef.current;
-
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      nextPlayTimeRef.current = 0;
-      return;
+  // Schedule each incoming chunk directly on the Web Audio timeline as it
+  // arrives, chaining via nextPlayTimeRef. No queue, no waiting for onended —
+  // onended fires AFTER the audio has already stopped, which made the
+  // `+0.03` lookahead win the Math.max and inserted a gap between chunks.
+  const stopAllPlayback = useCallback(() => {
+    for (const source of activeSourcesRef.current) {
+      try { source.stop(); } catch { /* already ended */ }
     }
-
-    let lastSource: AudioBufferSourceNode | null = null;
-
-    // Schedule every currently-queued chunk in a single pass, chained
-    // seamlessly via nextPlayTimeRef.
-    while (audioQueueRef.current.length > 0) {
-      const chunk = audioQueueRef.current.shift()!;
-      if (chunk.length === 0) continue;
-
-      const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
-      buffer.getChannelData(0).set(chunk);
-
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-
-      // The +0.03 lookahead only applies to the FIRST chunk when the queue
-      // was previously empty. Subsequent chunks start exactly where the
-      // previous one ended (nextPlayTimeRef is already ahead of currentTime).
-      const startTime = Math.max(ctx.currentTime + 0.03, nextPlayTimeRef.current);
-      source.start(startTime);
-      nextPlayTimeRef.current = startTime + buffer.duration;
-      lastSource = source;
-    }
-
-    if (lastSource) {
-      lastSource.onended = () => {
-        if (audioQueueRef.current.length === 0) {
-          isPlayingRef.current = false;
-          nextPlayTimeRef.current = 0;
-        } else {
-          // New chunks arrived while the tail was playing — schedule them.
-          processQueue();
-        }
-      };
-    }
+    activeSourcesRef.current.clear();
+    nextPlayTimeRef.current = 0;
   }, []);
 
   const playAudioChunk = useCallback(async (base64Data: string) => {
-    const audioContext = audioContextRef.current;
-    if (audioContext && audioContext.state === 'suspended') {
-      await audioContext.resume();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume(); } catch { /* ignore */ }
     }
 
     const floatData = base64ToFloat32(base64Data);
-    if (audioQueueRef.current.length >= MAX_AUDIO_QUEUE_CHUNKS) {
-      audioQueueRef.current.splice(0, audioQueueRef.current.length - MAX_AUDIO_QUEUE_CHUNKS + 1);
-    }
+    if (floatData.length === 0) return;
 
-    audioQueueRef.current.push(floatData);
-    if (!isPlayingRef.current) {
-      isPlayingRef.current = true;
-      processQueue();
-    }
-  }, [processQueue]);
+    const buffer = ctx.createBuffer(1, floatData.length, SAMPLE_RATE);
+    buffer.getChannelData(0).set(floatData);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    // If the timeline has already fallen behind real-time, start slightly in
+    // the future (30 ms jitter buffer). Otherwise start exactly where the
+    // previous chunk ended — seamless chaining, zero gaps.
+    const startTime = Math.max(ctx.currentTime + 0.03, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + buffer.duration;
+
+    activeSourcesRef.current.add(source);
+    source.onended = () => {
+      activeSourcesRef.current.delete(source);
+    };
+  }, []);
 
   // --- Connect ---
   const ensureAudioContext = useCallback(async () => {
     if (!audioContextRef.current) {
-      // FIX #3 (optional): Ask the browser to run the context at 24 kHz so
-      // playback skips the internal 48k->24k resample. Harmless if ignored.
-      audioContextRef.current = new AudioContext({
-        latencyHint: 'interactive',
-        sampleRate: SAMPLE_RATE,
-      });
+      audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
     }
-
     if (audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume();
     }
-
     return audioContextRef.current;
   }, []);
 
   const connect = useCallback(async (token: string, resume = false) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     setStatus('connecting');
     setState((prev) => ({ ...prev, error: null }));
@@ -182,6 +141,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     ws.onopen = () => {
       setStatus('connected');
+      log('WebSocket open, sending session config');
       ws.send(JSON.stringify(resume && sessionIdRef.current
         ? { type: 'session.resume', session_id: sessionIdRef.current }
         : {
@@ -192,22 +152,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             input: {
               format: { encoding: 'audio/pcm' },
               keyterms: [
-                'Python',
-                'algorithm',
-                'function',
-                'variable',
-                'loop',
-                'API',
-                'React',
-                'SQL',
-                'debugging',
-                'calculus',
-                'algebra',
-                'equation',
-                'recursion',
-                'binary tree',
-                'sorting',
-                'data structure',
+                'Python', 'algorithm', 'function', 'variable', 'loop', 'API',
+                'React', 'SQL', 'debugging', 'calculus', 'algebra', 'equation',
+                'recursion', 'binary tree', 'sorting', 'data structure',
               ],
               turn_detection: {
                 vad_threshold: 0.5,
@@ -227,7 +174,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
-      // console.log('WS received:', data.type);
+      log('WS recv:', data.type);
 
       switch (data.type) {
         case 'session.ready':
@@ -248,7 +195,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           break;
 
         case 'transcript.user':
-          // Partials and final user transcripts
           addUserTranscript(data.text, data.is_final || false);
           break;
 
@@ -257,25 +203,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           break;
 
         case 'reply.audio':
-          // Audio chunk from the agent — play it
-          if (data.data) {
-            playAudioChunk(data.data);
-          }
+          if (data.data) playAudioChunk(data.data);
           break;
 
         case 'reply.done':
           if (data.status === 'interrupted') {
-            // User interrupted — flush audio queue
-            audioQueueRef.current = [];
-            isPlayingRef.current = false;
-            nextPlayTimeRef.current = 0;
+            stopAllPlayback();
             pendingToolResultsRef.current.clear();
           } else {
-            // FIX #2: Dispatch tool results WITHOUT awaiting them here.
-            // Awaiting inside onmessage blocks the WebSocket message loop,
-            // so reply.audio chunks arriving during a slow tool call would
-            // pile up unprocessed — causing an audible stall. Send each
-            // result via .then() instead; the server correlates by call_id.
             const entries = Array.from(pendingToolResultsRef.current.entries());
             pendingToolResultsRef.current.clear();
             for (const [callId, resultPromise] of entries) {
@@ -331,7 +266,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           break;
 
         default:
-          // Ignore other events (e.g., input.speech.started/stopped)
           break;
       }
     };
@@ -363,22 +297,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       setStatus('error');
       setState((prev) => ({ ...prev, error: 'WebSocket error occurred.' }));
     };
-  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus]);
+  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus, stopAllPlayback, log]);
 
   connectRef.current = connect;
 
   // --- Start Microphone ---
   const startMicrophone = useCallback(async () => {
-    if (audioContextRef.current && micStreamRef.current) {
-      // Already running
-      return;
-    }
+    if (audioContextRef.current && micStreamRef.current) return;
 
     try {
       const ctx = await ensureAudioContext();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: SAMPLE_RATE,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: false,
@@ -392,8 +322,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       processorRef.current = processor;
 
       let pcmBuffer = new Int16Array(0);
+      let captureCount = 0;
 
       processor.onaudioprocess = (e) => {
+        captureCount++;
+        if (DEBUG && captureCount % 100 === 0) {
+          log('mic capture alive, callbacks:', captureCount);
+        }
+
         const inputData = e.inputBuffer.getChannelData(0);
         const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
         const int16 = float32ToInt16(resampled);
@@ -409,21 +345,27 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           const base64 = int16ToBase64(chunk);
 
           if (wsRef.current?.readyState === WebSocket.OPEN && !endingRef.current) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: 'input.audio',
-                audio: base64,
-              })
-            );
+            wsRef.current.send(JSON.stringify({ type: 'input.audio', audio: base64 }));
           }
         }
       };
 
       source.connect(processor);
 
+      // FIX: In Chrome, ScriptProcessorNode.onaudioprocess does NOT fire unless
+      // the node is connected downstream to AudioDestinationNode. Route the
+      // output through a silent gain node so we satisfy that requirement
+      // without playing mic audio back through the speakers (no feedback).
+      const silentGain = ctx.createGain();
+      silentGain.gain.value = 0;
+      processor.connect(silentGain);
+      silentGain.connect(ctx.destination);
+      silentGainRef.current = silentGain;
+
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
+      log('microphone started, ctx rate:', ctx.sampleRate, 'state:', ctx.state);
     } catch (err) {
       setState((prev) => ({
         ...prev,
@@ -431,7 +373,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, [ensureAudioContext, setStatus]);
+  }, [ensureAudioContext, setStatus, log]);
 
   // --- Disconnect ---
   const disconnect = useCallback(() => {
@@ -440,7 +382,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    // Close WebSocket
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'session.end' }));
@@ -454,37 +395,30 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }
       wsRef.current = null;
     }
-
-    // Stop microphone
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
     }
-
     if (processorRef.current) {
+      processorRef.current.onaudioprocess = null;
       processorRef.current.disconnect();
       processorRef.current = null;
     }
-
+    if (silentGainRef.current) {
+      silentGainRef.current.disconnect();
+      silentGainRef.current = null;
+    }
+    stopAllPlayback();
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
-
-    // Reset playback
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    nextPlayTimeRef.current = 0;
     sessionIdRef.current = null;
-
     setStatus('idle');
-    setState((prev) => ({
-      ...prev,
-      sessionId: null,
-    }));
-  }, [setStatus]);
+    setState((prev) => ({ ...prev, sessionId: null }));
+  }, [setStatus, stopAllPlayback]);
 
-  // --- Initiate session (fetch token, connect, start mic) ---
+  // --- Initiate session ---
   const startSession = useCallback(async () => {
     endingRef.current = false;
     try {
@@ -503,11 +437,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     }
   }, [connect, ensureAudioContext, startMicrophone, setStatus]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      disconnect();
-    };
+    return () => { disconnect(); };
   }, [disconnect]);
 
   return {
@@ -519,7 +450,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   };
 }
 
-// Helper import for base64ToFloat32
 function base64ToFloat32(base64: string): Float32Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
