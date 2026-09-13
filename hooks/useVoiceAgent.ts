@@ -4,7 +4,7 @@ import { toolDefinitions } from '@/lib/tools';
 import { agentConfig } from '@/lib/agent-config';
 import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
 
-const DEBUG = false; // flip to true to log mic-capture heartbeats + WS events
+const DEBUG = true; // flip to true to log mic-capture heartbeats + WS events
 
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
