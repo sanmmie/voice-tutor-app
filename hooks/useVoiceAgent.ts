@@ -7,6 +7,7 @@ import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
 const CHUNK_SAMPLES = (SAMPLE_RATE * CHUNK_MS) / 1000; // 1200
+const MAX_AUDIO_QUEUE_CHUNKS = 10;
 
 interface UseVoiceAgentOptions {
   onTranscript?: (msg: TranscriptMessage) => void;
@@ -102,7 +103,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     source.buffer = buffer;
     source.connect(ctx.destination);
 
-    const startTime = Math.max(ctx.currentTime + 0.02, nextPlayTimeRef.current);
+    const startTime = Math.max(ctx.currentTime + 0.03, nextPlayTimeRef.current);
     source.start(startTime);
     nextPlayTimeRef.current = startTime + buffer.duration;
 
@@ -116,8 +117,17 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     };
   }, []);
 
-  const playAudioChunk = useCallback((base64Data: string) => {
+  const playAudioChunk = useCallback(async (base64Data: string) => {
+    const audioContext = audioContextRef.current;
+    if (audioContext && audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
     const floatData = base64ToFloat32(base64Data);
+    if (audioQueueRef.current.length >= MAX_AUDIO_QUEUE_CHUNKS) {
+      audioQueueRef.current.splice(0, audioQueueRef.current.length - MAX_AUDIO_QUEUE_CHUNKS + 1);
+    }
+
     audioQueueRef.current.push(floatData);
     if (!isPlayingRef.current) {
       isPlayingRef.current = true;
