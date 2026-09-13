@@ -325,11 +325,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       });
       micStreamRef.current = stream;
 
-      const ctx = new AudioContext();
+      const ctx = new AudioContext({ latencyHint: 'interactive' });
       audioContextRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
 
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const processor = ctx.createScriptProcessor(2048, 1, 1);
       processorRef.current = processor;
 
       let pcmBuffer = new Int16Array(0);
@@ -338,18 +338,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
         const inputData = e.inputBuffer.getChannelData(0);
         const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
         const int16 = float32ToInt16(resampled);
-        // Append to buffer
+
         const newBuffer = new Int16Array(pcmBuffer.length + int16.length);
         newBuffer.set(pcmBuffer);
         newBuffer.set(int16, pcmBuffer.length);
         pcmBuffer = newBuffer;
 
-        // If we have enough data for a chunk, send it
         while (pcmBuffer.length >= CHUNK_SAMPLES) {
           const chunk = pcmBuffer.slice(0, CHUNK_SAMPLES);
           pcmBuffer = pcmBuffer.slice(CHUNK_SAMPLES);
           const base64 = int16ToBase64(chunk);
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
+
+          if (wsRef.current?.readyState === WebSocket.OPEN && !endingRef.current) {
             wsRef.current.send(
               JSON.stringify({
                 type: 'input.audio',
@@ -361,8 +361,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       };
 
       source.connect(processor);
-      processor.connect(ctx.destination);
-      // Resume context if suspended
+
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
