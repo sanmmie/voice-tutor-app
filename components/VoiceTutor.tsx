@@ -44,7 +44,7 @@ export function VoiceTutor() {
   if (authLoading) {
     return (
       <div className="font-mono text-terminal-muted" role="status">
-        Loading account...
+        Loading VoiceTutor...
       </div>
     );
   }

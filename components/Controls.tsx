@@ -9,7 +9,7 @@ interface ControlsProps {
 }
 
 export function Controls({ isConnected, isRecording, onStart, onStop, status }: ControlsProps) {
-  const isBusy = status === 'connecting' || status === 'idle';
+  const isBusy = status === 'connecting';
 
   return (
     <div className="flex items-center gap-4">
