@@ -85,10 +85,16 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     const ctx = audioContextRef.current;
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
+      nextPlayTimeRef.current = 0;
       return;
     }
 
     const chunk = audioQueueRef.current.shift()!;
+    if (chunk.length === 0) {
+      processQueue();
+      return;
+    }
+
     const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
     buffer.getChannelData(0).set(chunk);
 
@@ -96,11 +102,16 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     source.buffer = buffer;
     source.connect(ctx.destination);
 
-    const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
+    const startTime = Math.max(ctx.currentTime + 0.02, nextPlayTimeRef.current);
     source.start(startTime);
     nextPlayTimeRef.current = startTime + buffer.duration;
 
     source.onended = () => {
+      if (audioQueueRef.current.length === 0) {
+        isPlayingRef.current = false;
+        nextPlayTimeRef.current = 0;
+        return;
+      }
       processQueue();
     };
   }, []);
