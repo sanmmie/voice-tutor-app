@@ -81,40 +81,56 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, []);
 
   // --- Audio Playback ---
+  // FIX #1: Drain the entire queue in one pass and chain chunks back-to-back
+  // via nextPlayTimeRef. Previously, each chunk scheduled one-at-a-time from
+  // the previous chunk's onended callback, and the `ctx.currentTime + 0.03`
+  // lookahead always won the Math.max — inserting ~40ms of silence between
+  // every 50ms chunk and halving the effective playback speed.
   const processQueue = useCallback(() => {
     if (!audioContextRef.current) return;
     const ctx = audioContextRef.current;
+
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       nextPlayTimeRef.current = 0;
       return;
     }
 
-    const chunk = audioQueueRef.current.shift()!;
-    if (chunk.length === 0) {
-      processQueue();
-      return;
+    let lastSource: AudioBufferSourceNode | null = null;
+
+    // Schedule every currently-queued chunk in a single pass, chained
+    // seamlessly via nextPlayTimeRef.
+    while (audioQueueRef.current.length > 0) {
+      const chunk = audioQueueRef.current.shift()!;
+      if (chunk.length === 0) continue;
+
+      const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
+      buffer.getChannelData(0).set(chunk);
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+
+      // The +0.03 lookahead only applies to the FIRST chunk when the queue
+      // was previously empty. Subsequent chunks start exactly where the
+      // previous one ended (nextPlayTimeRef is already ahead of currentTime).
+      const startTime = Math.max(ctx.currentTime + 0.03, nextPlayTimeRef.current);
+      source.start(startTime);
+      nextPlayTimeRef.current = startTime + buffer.duration;
+      lastSource = source;
     }
 
-    const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
-    buffer.getChannelData(0).set(chunk);
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    const startTime = Math.max(ctx.currentTime + 0.03, nextPlayTimeRef.current);
-    source.start(startTime);
-    nextPlayTimeRef.current = startTime + buffer.duration;
-
-    source.onended = () => {
-      if (audioQueueRef.current.length === 0) {
-        isPlayingRef.current = false;
-        nextPlayTimeRef.current = 0;
-        return;
-      }
-      processQueue();
-    };
+    if (lastSource) {
+      lastSource.onended = () => {
+        if (audioQueueRef.current.length === 0) {
+          isPlayingRef.current = false;
+          nextPlayTimeRef.current = 0;
+        } else {
+          // New chunks arrived while the tail was playing — schedule them.
+          processQueue();
+        }
+      };
+    }
   }, []);
 
   const playAudioChunk = useCallback(async (base64Data: string) => {
@@ -138,7 +154,12 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   // --- Connect ---
   const ensureAudioContext = useCallback(async () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
+      // FIX #3 (optional): Ask the browser to run the context at 24 kHz so
+      // playback skips the internal 48k->24k resample. Harmless if ignored.
+      audioContextRef.current = new AudioContext({
+        latencyHint: 'interactive',
+        sampleRate: SAMPLE_RATE,
+      });
     }
 
     if (audioContextRef.current.state === 'suspended') {
@@ -250,17 +271,24 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             nextPlayTimeRef.current = 0;
             pendingToolResultsRef.current.clear();
           } else {
-            for (const [callId, resultPromise] of pendingToolResultsRef.current) {
-              const toolResult = await resultPromise;
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'tool.result',
-                  call_id: callId,
-                  result: JSON.stringify(toolResult.result),
-                  is_error: toolResult.isError,
-                }));
-              }
-              pendingToolResultsRef.current.delete(callId);
+            // FIX #2: Dispatch tool results WITHOUT awaiting them here.
+            // Awaiting inside onmessage blocks the WebSocket message loop,
+            // so reply.audio chunks arriving during a slow tool call would
+            // pile up unprocessed — causing an audible stall. Send each
+            // result via .then() instead; the server correlates by call_id.
+            const entries = Array.from(pendingToolResultsRef.current.entries());
+            pendingToolResultsRef.current.clear();
+            for (const [callId, resultPromise] of entries) {
+              resultPromise.then((toolResult) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({
+                    type: 'tool.result',
+                    call_id: callId,
+                    result: JSON.stringify(toolResult.result),
+                    is_error: toolResult.isError,
+                  }));
+                }
+              });
             }
           }
           break;
@@ -277,9 +305,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           const resultPromise = (async () => {
             try {
               const res = await fetch('/api/tool', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: data.name, args: data.arguments }),
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: data.name, args: data.arguments }),
               });
               const json = await res.json();
               if (!res.ok) throw new Error(json.error || 'Tool execution failed');
