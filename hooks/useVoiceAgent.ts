@@ -136,6 +136,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, [processQueue]);
 
   // --- Connect ---
+  const ensureAudioContext = useCallback(async () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
+    }
+
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+
+    return audioContextRef.current;
+  }, []);
+
   const connect = useCallback(async (token: string, resume = false) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -329,12 +341,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
   // --- Start Microphone ---
   const startMicrophone = useCallback(async () => {
-    if (audioContextRef.current) {
+    if (audioContextRef.current && micStreamRef.current) {
       // Already running
       return;
     }
 
     try {
+      const ctx = await ensureAudioContext();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: SAMPLE_RATE,
@@ -346,10 +359,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       });
       micStreamRef.current = stream;
 
-      const ctx = new AudioContext({ latencyHint: 'interactive' });
-      audioContextRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
-
       const processor = ctx.createScriptProcessor(2048, 1, 1);
       processorRef.current = processor;
 
@@ -393,7 +403,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, [setStatus]);
+  }, [ensureAudioContext, setStatus]);
 
   // --- Disconnect ---
   const disconnect = useCallback(() => {
@@ -453,6 +463,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       const res = await fetch('/api/token');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to get token');
+      await ensureAudioContext();
       await connect(data.token);
       await startMicrophone();
     } catch (err) {
@@ -462,7 +473,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, [connect, startMicrophone, setStatus]);
+  }, [connect, ensureAudioContext, startMicrophone, setStatus]);
 
   // Cleanup on unmount
   useEffect(() => {
