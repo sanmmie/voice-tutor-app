@@ -78,14 +78,22 @@ const codeExamples: Record<string, Record<string, string>> = {
 
 function findBestMatch(concept: string, language: string): string | null {
   const lower = concept.toLowerCase();
-  // Try exact match first
+  // Match on whole tokens only, bounded by word boundaries, so "reverse a
+  // string" matches but "reversed" or "string reversal" do not spuriously
+  // match. Prefer the longest matching key so "react usestate" beats "react".
+  let best: { key: string; example: string } | null = null;
   for (const [key, examples] of Object.entries(codeExamples)) {
-    if (lower.includes(key) || key.includes(lower)) {
-      const lang = language in examples ? language : 'python';
-      return examples[lang] || examples.python;
+    const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(key)}([^a-z0-9]|$)`, 'i');
+    if (regex.test(lower)) {
+      const example = examples[language] || examples.python;
+      if (!best || key.length > best.key.length) best = { key, example };
     }
   }
-  return null;
+  return best?.example ?? null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export async function executeTool(name: string, args: Record<string, any>): Promise<any> {
@@ -94,9 +102,13 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       const { expression } = args;
       if (typeof expression !== 'string' || !expression.trim()) throw new Error('Missing expression');
       if (expression.length > 500) throw new Error('Expression is too long');
-      if (/;|:=|import|createUnit|derivative|simplify|parse|evaluate/i.test(expression)) {
-        throw new Error('Expression contains an unsupported operation');
-      }
+      // Blocklist is a defense-in-depth net, not a security boundary: the
+      // real protection is that mathjs `evaluate` only exposes math, not JS.
+      // Match whole tokens (bounded by whitespace, parens, operators, or
+      // string boundaries) so a legitimate variable named `importance` or
+      // `simplifyX` is not falsely rejected.
+      const blocked = /\b(?:import|require|process|eval|Function|constructor|globalThis|window|document|fetch|XMLHttpRequest|child_process|fs\b|os\b|crypto\b|net\b|tls\b|cluster\b|worker_threads|require\.main|module\.exports|__dirname|__filename)\b/i.test(expression);
+      if (blocked) throw new Error('Expression contains an unsupported operation');
       try {
         const result = evaluate(expression);
         return { expression, result };

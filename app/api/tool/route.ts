@@ -43,7 +43,12 @@ export async function POST(request: NextRequest) {
       }),
     ]);
     return apiResponse(request, '/api/tool', requestId, 200, startedAt, { result });
-  } catch {
-    return apiResponse(request, '/api/tool', requestId, 400, startedAt, { error: 'Tool execution failed' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Tool execution failed';
+    // A timeout or any other server-side failure is a 5xx, not a client
+    // error — the client surfaces the message verbatim either way, but the
+    // status code should reflect what actually went wrong.
+    const status = /timed? out|timeout/i.test(message) ? 504 : 500;
+    return apiResponse(request, '/api/tool', requestId, status, startedAt, { error: message });
   }
 }

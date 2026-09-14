@@ -32,12 +32,17 @@ export function TranscriptList({ userTranscripts, agentTranscripts }: Transcript
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-2 pr-2 max-h-[400px]">
-      {allMessages.map((msg, idx) => {
+      {allMessages.map((msg) => {
         const isUser = msg.speaker === 'user';
         const isPartial = isUser && !msg.isFinal;
+        // Stable key per message: timestamp + first 8 chars of text. Using an
+        // array index as the key was wrong because partials get replaced in
+        // place (not appended), which made React lose track of elements and
+        // re-render the list on every delta.
+        const key = `${msg.timestamp}:${msg.text.slice(0, 8)}`;
         return (
           <div
-            key={idx}
+            key={key}
             className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in`}
           >
             <div

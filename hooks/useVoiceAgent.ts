@@ -2,9 +2,9 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { ToolCall, ToolCallUI, TranscriptMessage, VoiceAgentState } from '@/lib/types';
 import { toolDefinitions } from '@/lib/tools';
 import { agentConfig } from '@/lib/agent-config';
-import { float32ToInt16, int16ToBase64, resampleFloat32 } from '@/utils/audio';
+import { float32ToInt16, int16ToBase64, resampleFloat32, base64ToFloat32 } from '@/utils/audio';
 
-const DEBUG = true; // flip to true to log mic-capture heartbeats + WS events
+const DEBUG = false; // flip to true to log mic-capture heartbeats + WS events
 
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
@@ -35,7 +35,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
-  const pendingToolResultsRef = useRef<Map<string, Promise<{ result: unknown; isError: boolean }>>>(new Map());
+  const pendingToolResultsRef = useRef<Map<string, Promise<{
+    result: unknown;
+    isError: boolean;
+    error?: string;
+  }>>>(new Map());
   const reconnectTimerRef = useRef<number | null>(null);
   const endTimerRef = useRef<number | null>(null);
   const endingRef = useRef(false);
@@ -52,7 +56,17 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
   const addUserTranscript = useCallback((text: string, isFinal: boolean) => {
     const msg: TranscriptMessage = { type: 'transcript.user', text, timestamp: Date.now(), isFinal };
-    setState((prev) => ({ ...prev, userTranscripts: [...prev.userTranscripts, msg] }));
+    setState((prev) => {
+      const last = prev.userTranscripts[prev.userTranscripts.length - 1];
+      // If the previous entry was an in-progress (non-final) partial, replace it
+      // in place rather than appending — otherwise every delta piles up as a
+      // separate transcript line instead of updating live.
+      if (last && !last.isFinal) {
+        const userTranscripts = prev.userTranscripts.slice(0, -1).concat(msg);
+        return { ...prev, userTranscripts };
+      }
+      return { ...prev, userTranscripts: [...prev.userTranscripts, msg] };
+    });
     onTranscript?.(msg);
   }, [onTranscript]);
 
@@ -131,7 +145,10 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, []);
 
   const connect = useCallback(async (token: string, resume = false) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Only short-circuit when there's a genuinely live, usable socket. A socket
+    // that is closing or already closed (e.g. right after disconnect) must NOT
+    // block a fresh connect — otherwise "Stop then Start" silently does nothing.
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && !endingRef.current) return;
 
     setStatus('connecting');
     setState((prev) => ({ ...prev, error: null }));
@@ -150,6 +167,9 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             system_prompt: agentConfig.systemPrompt,
             greeting: agentConfig.greeting,
             input: {
+              // `audio/pcm` is the documented default encoding for 24 kHz mono
+              // PCM16. Do not change it to `audio/pcm16` — that token is not
+              // recognized and the server rejects the session.update.
               format: { encoding: 'audio/pcm' },
               keyterms: [
                 'Python', 'algorithm', 'function', 'variable', 'loop', 'API',
@@ -174,7 +194,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
-      log('WS recv:', data.type);
+      if (data.type !== 'reply.audio') log('WS recv:', data.type);
 
       switch (data.type) {
         case 'session.ready':
@@ -194,8 +214,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           }
           break;
 
+        case 'transcript.user.delta':
+          // Live partial transcript while the student is still speaking.
+          addUserTranscript(data.text, false);
+          break;
+
         case 'transcript.user':
-          addUserTranscript(data.text, data.is_final || false);
+          // Final transcript for the student's turn.
+          addUserTranscript(data.text, true);
           break;
 
         case 'transcript.agent':
@@ -206,27 +232,39 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           if (data.data) playAudioChunk(data.data);
           break;
 
-        case 'reply.done':
-          if (data.status === 'interrupted') {
-            stopAllPlayback();
-            pendingToolResultsRef.current.clear();
-          } else {
-            const entries = Array.from(pendingToolResultsRef.current.entries());
-            pendingToolResultsRef.current.clear();
-            for (const [callId, resultPromise] of entries) {
-              resultPromise.then((toolResult) => {
-                if (ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({
-                    type: 'tool.result',
-                    call_id: callId,
-                    result: JSON.stringify(toolResult.result),
-                    is_error: toolResult.isError,
-                  }));
-                }
-              });
-            }
+        case 'reply.done': {
+          // Drain every pending tool call. The AssemblyAI protocol expects a
+          // `tool.result` for each `tool.call` once `reply.done` fires; dropping
+          // them leaves the agent waiting until its tool timeout fires.
+          //
+          // On interrupt the agent stops speaking but still expects results for
+          // any in-flight tool calls, so we send an error envelope instead of
+          // silently discarding them — otherwise the session hangs.
+          const interrupted = data.status === 'interrupted';
+          if (interrupted) stopAllPlayback();
+
+          const entries = Array.from(pendingToolResultsRef.current.entries());
+          pendingToolResultsRef.current.clear();
+          for (const [callId, resultPromise] of entries) {
+            resultPromise.then((toolResult) => {
+              const sock = wsRef.current;
+              // Never write to a socket that is gone, closed, or whose session
+              // is tearing down. Without this guard a late tool result can throw
+              // "WebSocket is not open" (or worse, be sent to a replacement socket).
+              if (!sock || sock.readyState !== WebSocket.OPEN || endingRef.current) return;
+              const isError = interrupted || toolResult.isError;
+              const envelope = isError
+                ? { error: interrupted ? 'Interrupted by user' : (toolResult.error as string) }
+                : toolResult.result;
+              sock.send(JSON.stringify({
+                type: 'tool.result',
+                call_id: callId,
+                result: JSON.stringify(envelope),
+              }));
+            });
           }
           break;
+        }
 
         case 'tool.call': {
           const call: ToolCallUI = {
@@ -237,7 +275,11 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           };
           addToolCall(call);
 
-          const resultPromise = (async () => {
+          const resultPromise = (async (): Promise<{
+            result: unknown;
+            isError: boolean;
+            error?: string;
+          }> => {
             try {
               const res = await fetch('/api/tool', {
                 method: 'POST',
@@ -252,7 +294,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
               const errorMsg = err instanceof Error ? err.message : 'Tool failed';
               const result = { error: errorMsg };
               updateToolCallResult(data.call_id, result, 'error');
-              return { result, isError: true };
+              return { result, isError: true, error: errorMsg };
             }
           })();
           pendingToolResultsRef.current.set(data.call_id, resultPromise);
@@ -271,8 +313,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     };
 
     ws.onclose = (event) => {
+      // Gate on the captured socket: if this socket has been replaced (the user
+      // stopped and started a new session before the old one closed) or torn
+      // down intentionally, ignore the event entirely. Without this guard a
+      // stale onclose can fire after a fresh session is open and either
+      // schedule a reconnect or stamp an error onto the new session.
+      if (wsRef.current !== ws) return;
       setStatus('disconnected');
       wsRef.current = null;
+      if (endTimerRef.current !== null) {
+        window.clearTimeout(endTimerRef.current);
+        endTimerRef.current = null;
+      }
       if (!endingRef.current && sessionIdRef.current && event.code !== 1008 && event.code !== 1000) {
         reconnectTimerRef.current = window.setTimeout(async () => {
           try {
@@ -382,18 +434,27 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    if (wsRef.current) {
-      if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'session.end' }));
-        const socket = wsRef.current;
+    const socket = wsRef.current;
+    if (socket) {
+      if (socket.readyState === WebSocket.OPEN) {
+        // Send a clean session.end and wait for the server to close. The
+        // onclose handler will null wsRef and clear this timer; if the server
+        // doesn't cooperate, force-close after 2s. Null wsRef now so a
+        // subsequent startSession doesn't see a stale socket; the local
+        // `socket` variable keeps the handle alive for the endTimer.
+        socket.send(JSON.stringify({ type: 'session.end' }));
+        wsRef.current = null;
         endTimerRef.current = window.setTimeout(() => {
           if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
             socket.close();
           }
           endTimerRef.current = null;
         }, 2000);
+      } else {
+        // Already closing or closed — nothing to send, clear the ref now so a
+        // subsequent startSession doesn't see a stale socket.
+        wsRef.current = null;
       }
-      wsRef.current = null;
     }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -448,18 +509,4 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     isRecording: state.status === 'recording',
     isConnected: state.status === 'connected' || state.status === 'recording',
   };
-}
-
-function base64ToFloat32(base64: string): Float32Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  const int16Array = new Int16Array(bytes.buffer);
-  const float32Array = new Float32Array(int16Array.length);
-  for (let i = 0; i < int16Array.length; i++) {
-    float32Array[i] = int16Array[i] / 0x8000;
-  }
-  return float32Array;
 }
