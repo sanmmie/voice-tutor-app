@@ -76,6 +76,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     onTranscript?.(msg);
   }, [onTranscript]);
 
+  // Additive helper for restoring a previously-saved conversation into the
+  // live UI (chat history replay). It is a no-op if the caller passes
+  // undefined, so existing consumers are unaffected.
+  const setTranscripts = useCallback((
+    userTranscripts: TranscriptMessage[],
+    agentTranscripts: TranscriptMessage[],
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      userTranscripts: userTranscripts ?? prev.userTranscripts,
+      agentTranscripts: agentTranscripts ?? prev.agentTranscripts,
+    }));
+  }, []);
+
   const addToolCall = useCallback((call: ToolCallUI) => {
     setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, call] }));
     onToolCall?.(call);
@@ -506,6 +520,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     state,
     startSession,
     disconnect,
+    setTranscripts,
     isRecording: state.status === 'recording',
     isConnected: state.status === 'connected' || state.status === 'recording',
   };

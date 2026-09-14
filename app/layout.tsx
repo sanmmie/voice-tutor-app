@@ -7,8 +7,8 @@ export const viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Voice Tutor — AssemblyAI LabLab',
-  description: 'A voice-based coding and math tutor powered by AssemblyAI Voice Agent API',
+  title: 'DeltaOS Core — Voice Tutor',
+  description: 'A voice-based coding and math tutor powered by DeltaOS Core and AssemblyAI.',
 };
 
 export default function RootLayout({
@@ -19,9 +19,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-terminal-bg text-terminal-text antialiased font-mono">
-        <main className="w-full min-h-screen flex items-center justify-center p-4">
-          {children}
-        </main>
+        {children}
       </body>
     </html>
   );

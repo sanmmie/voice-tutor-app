@@ -108,6 +108,13 @@ export async function getAuthenticatedUserId(request: NextRequest): Promise<stri
   return (await redis.get<string>(`session:${id}`)) || null;
 }
 
+export async function getAuthenticatedUserIdAsNumber(request: NextRequest): Promise<number | null> {
+  const userId = await getAuthenticatedUserId(request);
+  if (!userId) return null;
+  const parsed = parseInt(userId, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export async function destroySession(request: NextRequest, response: NextResponse) {
   const value = request.cookies.get(SESSION_COOKIE)?.value;
   const id = value?.split('.')[0];
