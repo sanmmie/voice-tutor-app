@@ -22,7 +22,12 @@ export async function GET(request: NextRequest) {
       return apiResponse(request, '/api/token', requestId, 403, startedAt, { error: 'Forbidden' });
     }
 
-    if (!(await getAuthenticatedUserId(request))) {
+    // Guest mode: skip the session check entirely so unauthenticated judges can
+    // reach the tutor without registering. Still rate-limited and same-origin
+    // enforced. The token gets a shorter TTL so guest sessions expire faster.
+    const url = new URL(request.url);
+    const isGuest = url.searchParams.get('guest') === 'true';
+    if (!isGuest && !(await getAuthenticatedUserId(request))) {
       return apiResponse(request, '/api/token', requestId, 401, startedAt, { error: 'Not authenticated' });
     }
 
@@ -31,8 +36,11 @@ export async function GET(request: NextRequest) {
       return apiResponse(request, '/api/token', requestId, 500, startedAt, { error: 'Service is not configured' });
     }
 
+    // Guest sessions are capped shorter so a forgotten tab doesn't hold a
+    // voice slot for hours. Authenticated sessions keep the full 3h.
+    const maxDuration = isGuest ? 3600 : 10800;
     const res = await fetch(
-      'https://agents.assemblyai.com/v1/token?expires_in_seconds=300&max_session_duration_seconds=10800',
+      `https://agents.assemblyai.com/v1/token?expires_in_seconds=300&max_session_duration_seconds=${maxDuration}`,
       {
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -50,7 +58,7 @@ export async function GET(request: NextRequest) {
       return apiResponse(request, '/api/token', requestId, 502, startedAt, { error: 'Invalid token response' });
     }
 
-    const response = apiResponse(request, '/api/token', requestId, 200, startedAt, { token: data.token }, {
+    const response = apiResponse(request, '/api/token', requestId, 200, startedAt, { token: data.token, guest: isGuest }, {
       headers: { 'Cache-Control': 'no-store' },
     });
     return response;

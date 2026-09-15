@@ -154,6 +154,29 @@ Voice Tutor targets WCAG 2.1 AA behavior and should be tested with keyboard, scr
 
 Accessibility is a release requirement, not a final styling pass. Add checks to component reviews and test representative voice flows on mobile and desktop.
 
+## Guest Mode
+
+### Guest banner component
+
+A thin delta-blue tinted bar shown at the top of the tutor view when `isGuest` is true, with an inline "Sign in" link.
+
+- **States:** visible (default when `isGuest=true`), hidden when signed in.
+- **Styling:** `delta.500` border-top, `delta.900/50` background tint, `delta.200` text, `delta.400` link with underline on hover.
+- **Accessibility:** role="status", polite live region for the sign-in prompt.
+
+### "Continue as Guest" button in AuthPanel
+
+- **Style:** secondary button (bordered, delta-blue tint), full width.
+- **Placement:** sits below the primary submit button.
+- **States:** default, hover (lightened border/surface), focus-visible (2px `terminal.accent` ring with `ring-offset-2`), disabled during loading (muted text, subdued border, non-interactive cursor).
+- **Keyboard:** fully focusable, standard button activation with Enter/Space.
+
+### Behavior
+
+- Clicking sets `isGuest=true` and calls `startSession({ guest: true })`, which hits `/api/token?guest=true`.
+- The sidebar is hidden for guests.
+- The sign-out control becomes "Exit guest" (same secondary style, triggers session teardown and clears `isGuest`).
+
 ## 9. Responsive breakpoints
 
 Use a mobile-first layout. Start with one column, full-width controls, and compact vertical rhythm, then add structure at the following breakpoints:

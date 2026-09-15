@@ -15,6 +15,7 @@ export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
@@ -22,6 +23,15 @@ export function VoiceTutor() {
 
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedChatRef = useRef(false);
+
+  // Guest mode: skip registration entirely. The token endpoint accepts
+  // ?guest=true (rate-limited, shorter TTL) so unauthenticated judges can
+  // reach the tutor immediately. Guest sessions have no chat history.
+  const startGuestSession = useCallback(async () => {
+    setIsGuest(true);
+    setAuthError(false);
+    await startSession({ guest: true });
+  }, [startSession]);
 
   const createNewChat = useCallback(async () => {
     if (!userId) return;
@@ -215,16 +225,22 @@ export function VoiceTutor() {
             </button>
           </p>
         )}
-        <AuthPanel onAuthenticated={(authenticatedUser) => {
-          setAuthError(false);
-          setUser(authenticatedUser);
-        }} />
+        <AuthPanel
+          onAuthenticated={(authenticatedUser) => {
+            setAuthError(false);
+            setIsGuest(false);
+            setUser(authenticatedUser);
+          }}
+          onGuest={startGuestSession}
+        />
       </div>
     );
   }
 
   const handleStart = () => {
-    startSession();
+    // Guest sessions always start fresh; authenticated sessions reuse the
+    // auto-created chat.
+    startSession(isGuest ? { guest: true } : undefined);
   };
 
   const handleStop = () => {
@@ -238,14 +254,40 @@ export function VoiceTutor() {
       }`}
       aria-hidden={chatHistoryOpen}
     >
-      <ChatHistory
-        userId={userId || 0}
-        isOpen={chatHistoryOpen}
-        onClose={() => setChatHistoryOpen(false)}
-        onSelectChat={handleSelectChat}
-        onNewChat={handleNewChat}
-        currentChatId={currentChatId}
-      />
+      {/* Guest sessions have no chat history to browse, so the sidebar is
+          rendered only for authenticated users. */}
+      {!isGuest && (
+        <ChatHistory
+          userId={userId || 0}
+          isOpen={chatHistoryOpen}
+          onClose={() => setChatHistoryOpen(false)}
+          onSelectChat={handleSelectChat}
+          onNewChat={handleNewChat}
+          currentChatId={currentChatId}
+        />
+      )}
+
+      {/* Guest banner — visible so judges know they are not signed in and
+          that their session is ephemeral. */}
+      {isGuest && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-delta-blue-500/30 bg-delta-blue-500/5 px-4 py-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-delta-blue-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7V4m0 0L8 12l8 8 8-8-8-8zm0 4v10" />
+            </svg>
+            <span className="text-xs font-mono text-delta-blue-200 truncate">
+              Guest session — conversations are not saved.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
+            className="text-xs font-mono text-delta-blue-300 hover:text-delta-blue-100 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-delta-blue-400 rounded"
+          >
+            Sign in
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <header className="flex items-center justify-between gap-3">
@@ -253,7 +295,8 @@ export function VoiceTutor() {
           <button
             type="button"
             onClick={() => setChatHistoryOpen((prev) => !prev)}
-            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+            disabled={isGuest}
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={chatHistoryOpen ? 'Close chat history' : 'Open chat history'}
             aria-expanded={chatHistoryOpen}
             aria-controls="chat-history-panel"
@@ -276,23 +319,25 @@ export function VoiceTutor() {
             {user.email}
           </span>
           <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
+          {!isGuest && (
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
-            onClick={handleNewChat}
-            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
-            aria-label="New conversation"
-            title="New conversation"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setUser(null); }}
+            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
             className="px-3 py-2 rounded-lg text-xs font-mono text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
           >
-            Sign out
+            {isGuest ? 'Exit guest' : 'Sign out'}
           </button>
         </div>
       </header>

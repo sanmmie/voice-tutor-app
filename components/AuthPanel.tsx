@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 
 interface AuthPanelProps {
   onAuthenticated: (user: { email: string; id: string; createdAt: string }) => void;
+  onGuest?: () => void;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -63,7 +64,7 @@ function EyeIcon({ open }: { open: boolean }) {
   );
 }
 
-export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
+export function AuthPanel({ onAuthenticated, onGuest }: AuthPanelProps) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -233,7 +234,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
               {confirmError && <span className="mt-1 block text-xs text-red-400">{confirmError}</span>}
             </label>
           )}
-          {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
+{error && <p className="text-sm text-red-400" role="alert">{error}</p>}
           <button
             type="submit"
             className="w-full rounded bg-terminal-accent px-4 py-3 font-mono text-sm font-semibold text-terminal-bg focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
@@ -241,13 +242,23 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             {loading ? (
               <span className="inline-flex items-center justify-center gap-2">
                 <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
                 Working...
               </span>
             ) : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
+          {onGuest && (
+            <button
+              type="button"
+              onClick={onGuest}
+              disabled={loading}
+              className="w-full rounded border border-delta-blue-500/40 bg-delta-blue-500/5 px-4 py-3 font-mono text-sm font-semibold text-delta-blue-300 transition-colors hover:bg-delta-blue-500/15 hover:border-delta-blue-400 focus-visible:ring-2 focus-visible:ring-delta-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Continue as Guest
+            </button>
+          )}
         </form>
       </div>
     </main>

@@ -85,6 +85,15 @@ npm run build
 - Tool execution is capped at five seconds; Wikipedia lookups time out after four seconds, and math expressions are bounded to prevent runaway evaluation.
 - API requests emit structured JSON logs with request ID, route, status, duration, and client IP for ingestion by Vercel Logs or another centralized logging provider.
 - Configure alerts on `/api/health` 5xx responses, elevated authentication or tool `429` responses, and upstream token failures.
+## Guest Mode
+
+Judges and reviewers can use the app without registering by clicking "Continue as Guest" on the auth screen.
+
+- Guest sessions are rate-limited and get a shorter AssemblyAI token TTL (1 hour vs 3 hours for authenticated users).
+- Guest conversations are NOT persisted to chat history; they are ephemeral.
+- Guest mode still enforces same-origin checks and rate limiting for security.
+- To save conversations across sessions, create a free account.
+
 ## Project Structure
 
 ```

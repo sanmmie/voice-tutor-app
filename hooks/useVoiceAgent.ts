@@ -512,10 +512,14 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   }, [setStatus, stopAllPlayback]);
 
   // --- Initiate session ---
-  const startSession = useCallback(async () => {
+  // `guest` skips the authenticated session check on the token endpoint so
+  // unauthenticated judges can reach the tutor without registering. Guest
+  // sessions are rate-limited and get a shorter token TTL.
+  const startSession = useCallback(async (options: { guest?: boolean } = {}) => {
     endingRef.current = false;
     try {
-      const res = await fetch('/api/token');
+      const tokenUrl = options.guest ? '/api/token?guest=true' : '/api/token';
+      const res = await fetch(tokenUrl);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to get token');
       await ensureAudioContext();
