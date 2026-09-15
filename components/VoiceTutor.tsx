@@ -232,7 +232,12 @@ export function VoiceTutor() {
   };
 
   return (
-    <div className="relative flex flex-col h-full max-w-4xl mx-auto p-6 space-y-6">
+    <div
+      className={`relative flex flex-col h-full max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-5 min-h-0 ${
+        chatHistoryOpen ? 'pointer-events-none select-none' : ''
+      }`}
+      aria-hidden={chatHistoryOpen}
+    >
       <ChatHistory
         userId={userId || 0}
         isOpen={chatHistoryOpen}
@@ -243,29 +248,40 @@ export function VoiceTutor() {
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
-            onClick={() => setChatHistoryOpen(true)}
-            className="p-1.5 text-terminal-muted hover:text-terminal-accent transition-colors rounded"
-            aria-label="Open chat history"
+            onClick={() => setChatHistoryOpen((prev) => !prev)}
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+            aria-label={chatHistoryOpen ? 'Close chat history' : 'Open chat history'}
+            aria-expanded={chatHistoryOpen}
+            aria-controls="chat-history-panel"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            {chatHistoryOpen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
           </button>
-          <Logo size={28} />
-          <h1 className="text-2xl font-mono font-bold text-terminal-accent">Voice Tutor</h1>
+          <Logo size={32} />
+          <h1 className="text-xl sm:text-2xl font-mono font-bold text-terminal-accent truncate">Voice Tutor</h1>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="hidden text-xs text-terminal-muted sm:inline">{user.email}</span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
+            {user.email}
+          </span>
           <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
           <button
             type="button"
             onClick={handleNewChat}
-            className="p-1.5 text-terminal-muted hover:text-terminal-accent transition-colors rounded"
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
             aria-label="New conversation"
+            title="New conversation"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -274,12 +290,12 @@ export function VoiceTutor() {
           <button
             type="button"
             onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setUser(null); }}
-            className="text-xs text-terminal-muted hover:text-terminal-accent"
+            className="px-3 py-2 rounded-lg text-xs font-mono text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
           >
             Sign out
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Visualizer */}
       <div className="flex justify-center">
@@ -298,7 +314,7 @@ export function VoiceTutor() {
       </div>
 
       {/* Transcripts */}
-      <div className="flex-1 min-h-[200px] bg-terminal-surface/30 rounded-xl border border-terminal-border p-4">
+      <div className="flex-1 min-h-0 bg-terminal-surface/30 rounded-xl border border-terminal-border p-3 sm:p-4">
         <TranscriptList
           userTranscripts={state.userTranscripts}
           agentTranscripts={state.agentTranscripts}
@@ -307,14 +323,19 @@ export function VoiceTutor() {
 
       {/* Tool Calls */}
       {state.toolCalls.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-sm font-mono text-terminal-muted">🔧 Tool Activity</div>
+        <section aria-label="Tool activity" className="space-y-2">
+          <h2 className="text-sm font-mono text-terminal-muted flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 4a2 2 0 114 0v4a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 114 0v2h2V4z"/>
+            </svg>
+            Tool Activity
+          </h2>
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
             {state.toolCalls.map((call) => (
               <ToolCallCard key={call.call_id} call={call} />
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

@@ -109,11 +109,15 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
     <main className="w-full max-w-md rounded-xl border border-terminal-border bg-terminal-surface/50 p-6">
       <h1 className="text-2xl font-mono font-bold text-terminal-accent">Voice Tutor</h1>
       <p className="mt-2 text-sm text-terminal-muted">Sign in to start a private tutoring session.</p>
-      <div className="mt-6 flex border-b border-terminal-border">
+      <div role="tablist" aria-label="Authentication mode" className="mt-6 flex border-b border-terminal-border">
         {(['login', 'register'] as const).map((option) => (
           <button
             key={option}
+            id={`tab-${option}`}
             type="button"
+            role="tab"
+            aria-selected={mode === option}
+            aria-controls="auth-panel"
             onClick={() => {
               setMode(option);
               setError(null);
@@ -122,120 +126,130 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
                 setConfirmError(null);
               }
             }}
-            className={`px-4 py-2 text-sm font-mono capitalize ${mode === option ? 'border-b-2 border-terminal-accent text-terminal-accent' : 'text-terminal-muted'}`}
+            className={`px-4 py-2 text-sm font-mono capitalize focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg ${mode === option ? 'border-b-2 border-terminal-accent text-terminal-accent' : 'text-terminal-muted'}`}
           >
             {option}
           </button>
         ))}
       </div>
-      <form onSubmit={submit} onKeyDown={handleKeyDown} className="mt-5 space-y-4">
-        <label className="block text-sm text-terminal-text">
-          Email
-          <input
-            required
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => {
-              const value = event.target.value;
-              setEmail(value);
-              if (isRegister && value && !EMAIL_REGEX.test(value)) {
-                setEmailError('Enter a valid email address');
-          } else if (isRegister && value) {
-            setEmailError(null);
-          }
-            }}
-            className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 text-terminal-text outline-none focus:border-terminal-accent"
-          />
-          {isRegister && emailError && (
-            <span className="mt-1 block text-xs text-red-400">{emailError}</span>
-          )}
-        </label>
-        <label className="block text-sm text-terminal-text">
-          Password
-          <div className="relative">
+      <div
+        role="tabpanel"
+        id="auth-panel"
+        aria-labelledby={mode === 'login' ? 'tab-login' : 'tab-register'}
+        className="mt-5"
+      >
+        <form onSubmit={submit} onKeyDown={handleKeyDown} className="space-y-4">
+          <label className="block text-sm text-terminal-text">
+            Email
             <input
               required
-              minLength={12}
-              maxLength={128}
-              type={showPassword ? 'text' : 'password'}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 pr-10 text-terminal-text outline-none focus:border-terminal-accent"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => {
+                const value = event.target.value;
+                setEmail(value);
+                if (isRegister && value && !EMAIL_REGEX.test(value)) {
+                  setEmailError('Enter a valid email address');
+                } else if (isRegister && value) {
+                  setEmailError(null);
+                }
+              }}
+              className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 text-terminal-text outline-none focus:border-terminal-accent focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
             />
-            <button
-              type="button"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-              onClick={() => setShowPassword((prev) => !prev)}
-              className="absolute right-2 top-2 text-terminal-muted hover:text-terminal-accent"
-            >
-              <EyeIcon open={showPassword} />
-            </button>
-          </div>
-          {isRegister && strength && (
-            <div className="mt-2">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-terminal-border">
-                <div
-                  className={`h-full ${strength.color} transition-all duration-300`}
-                  style={{ width: `${(strength.score / 4) * 100}%` }}
-                />
-              </div>
-              <span className="mt-1 block text-xs text-terminal-muted">
-                Strength: <span className="text-terminal-text">{strength.label}</span>
-              </span>
-            </div>
-          )}
-        </label>
-        {isRegister && (
+            {isRegister && emailError && (
+              <span className="mt-1 block text-xs text-red-400">{emailError}</span>
+            )}
+          </label>
           <label className="block text-sm text-terminal-text">
-            Confirm password
+            Password
             <div className="relative">
               <input
                 required
-                type={showConfirm ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setConfirmPassword(value);
-                  if (value && value !== password) {
-                    setConfirmError('Passwords do not match');
-                  } else {
-                    setConfirmError(null);
-                  }
-                }}
-                className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 pr-10 text-terminal-text outline-none focus:border-terminal-accent"
+                minLength={12}
+                maxLength={128}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 pr-10 text-terminal-text outline-none focus:border-terminal-accent focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
               />
               <button
                 type="button"
-                aria-label={showConfirm ? 'Hide password' : 'Show password'}
-                onClick={() => setShowConfirm((prev) => !prev)}
-                className="absolute right-2 top-2 text-terminal-muted hover:text-terminal-accent"
+                id="toggle-password"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-2 top-2 flex items-center justify-center rounded p-1.5 text-terminal-muted hover:text-terminal-accent focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
               >
-                <EyeIcon open={showConfirm} />
+                <EyeIcon open={showPassword} />
               </button>
             </div>
-            {confirmError && <span className="mt-1 block text-xs text-red-400">{confirmError}</span>}
+            {isRegister && strength && (
+              <div className="mt-2">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-terminal-border">
+                  <div
+                    className={`h-full ${strength.color} transition-all duration-300`}
+                    style={{ width: `${(strength.score / 4) * 100}%` }}
+                  />
+                </div>
+                <span className="mt-1 block text-xs text-terminal-muted">
+                  Strength: <span className="text-terminal-text">{strength.label}</span>
+                </span>
+              </div>
+            )}
           </label>
-        )}
-        {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded bg-terminal-accent px-4 py-3 font-mono text-sm font-semibold text-terminal-bg disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
-                <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Working...
-            </span>
-          ) : mode === 'login' ? 'Sign In' : 'Create Account'}
-        </button>
-      </form>
+          {isRegister && (
+            <label className="block text-sm text-terminal-text">
+              Confirm password
+              <div className="relative">
+                <input
+                  required
+                  type={showConfirm ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setConfirmPassword(value);
+                    if (value && value !== password) {
+                      setConfirmError('Passwords do not match');
+                    } else {
+                      setConfirmError(null);
+                    }
+                  }}
+                  className="mt-1 w-full rounded border border-terminal-border bg-terminal-bg px-3 py-2 pr-10 text-terminal-text outline-none focus:border-terminal-accent focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
+                />
+                <button
+                  type="button"
+                  id="toggle-confirm-password"
+                  aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
+                  aria-pressed={showConfirm}
+                  onClick={() => setShowConfirm((prev) => !prev)}
+                  className="absolute right-2 top-2 flex items-center justify-center rounded p-1.5 text-terminal-muted hover:text-terminal-accent focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
+                >
+                  <EyeIcon open={showConfirm} />
+                </button>
+              </div>
+              {confirmError && <span className="mt-1 block text-xs text-red-400">{confirmError}</span>}
+            </label>
+          )}
+          {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
+          <button
+            type="submit"
+            className="w-full rounded bg-terminal-accent px-4 py-3 font-mono text-sm font-semibold text-terminal-bg focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
+          >
+            {loading ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                  <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Working...
+              </span>
+            ) : mode === 'login' ? 'Sign In' : 'Create Account'}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

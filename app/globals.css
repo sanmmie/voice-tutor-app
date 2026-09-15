@@ -4,23 +4,77 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- Reset ----------
+   A minimal reset that deliberately does NOT zero margins/padding on
+   headings/lists (the previous `* { margin:0; padding:0 }` stripped Tailwind's
+   preflight and forced every element to carry explicit utility margins,
+   which is fragile and already inconsistent across components). */
 * {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+}
+
+/* ---------- Motion sensitivity ----------
+   Respect OS-level motion preferences. All animations in the app gate on
+   this media query so motion-sensitive users get a still experience
+   (WCAG 2.1.33 / 2.2.2). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Viewport shell ----------
+   The previous `body { display:flex; align-items:center; justify-content:center }`
+   centered the app vertically but gave the flex container no explicit height,
+   so `h-full` children (the transcript panel) could not fill the viewport.
+   On desktop this left dead vertical space; on mobile the transcript
+   collapsed. Now the body is a full-height grid so the app fills the screen. */
+html,
+body {
+  height: 100%;
 }
 
 body {
   background: #0a0a0f;
   min-height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+}
+
+/* ---------- Focus visibility ----------
+   The default browser outline is disabled across the codebase
+   (`outline-none` on inputs/buttons). Replace it with a visible, always-on
+   focus ring so keyboard users can navigate. The ring is subtle by default
+   and only appears on keyboard focus (not on click) via :focus-within. */
+:focus-visible {
+  outline: 2px solid #6ee7b7;
+  outline-offset: 2px;
+}
+
+/* Make sure focus rings never disappear in Windows high-contrast mode. */
+@media (prefers-high-contrast) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 0;
+  }
+}
+
+/* ---------- Scrollbar ----------
+   The previous 4px `-webkit-only` scrollbar was invisible on Firefox/Edge
+   and too thin to be a usable touch target on mobile. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a3a transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -29,12 +83,94 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: #2a2a3a;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #4a4a5a;
 }
 
-.delta-glow { filter: drop-shadow(0 0 6px rgba(59,130,246,0.55)); }
-.delta-glow-strong { filter: drop-shadow(0 0 14px rgba(59,130,246,0.8)); }
+/* ---------- DeltaOS Core logo glow ----------
+   FIXED: the previous values hardcoded Tailwind blue-500 (rgba(59,130,246)),
+   which clashed with the mint-green terminal accent (#6ee7b7). The glow now
+   uses the terminal accent so the logo reads as part of the UI. */
+.delta-glow {
+  filter: drop-shadow(0 0 6px rgba(110, 231, 183, 0.55));
+}
+
+.delta-glow-strong {
+  filter: drop-shadow(0 0 14px rgba(110, 231, 183, 0.8));
+}
+
+/* ---------- Component layer ----------
+   Reusable card/surface primitives so components don't drift. */
+.card {
+  @apply bg-terminal-surface/60 border border-terminal-border rounded-xl;
+}
+
+.card-elevated {
+  @apply bg-terminal-surface/80 border border-terminal-border rounded-xl shadow-lg shadow-black/30;
+}
+
+.panel-title {
+  @apply font-mono text-xs uppercase tracking-widest text-terminal-muted;
+}
+
+/* ---------- Skip link ----------
+   A skip-to-content link for keyboard users; visually hidden until focused
+   (WCAG 2.4.1 / 2.4.3). */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: #6ee7b7;
+  color: #0a0a0f;
+  font-weight: 700;
+  border-radius: 0 0 8px 0;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* ---------- Skeleton ----------
+   A reusable loading skeleton for the chat list and transcript panel. */
+.skeleton {
+  background: linear-gradient(90deg, #1a1a28 0%, #24243a 50%, #1a1a28 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- Visually hidden ----------
+   Hide from screen readers AND display (for decorative content). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Toast / status region ----------
+   A polite live region for non-visual status updates. */
+.status-live {
+  role: status;
+  aria-live: polite;
+}
