@@ -391,11 +391,16 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
 
     try {
       const ctx = await ensureAudioContext();
+      // NOTE: do NOT set noiseSuppression: false. Explicitly disabling it is a
+      // known Chrome desktop failure mode — when the audio processing module
+      // isn't available (virtual audio drivers, some laptops, headless CI),
+      // the constraint throws "Requested device not found" even though a real
+      // microphone is present. Letting Chrome use its default (enabled) is
+      // both more reliable and gives better voice quality for the tutor.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: false,
           autoGainControl: true,
         },
       });
@@ -451,9 +456,20 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }
       log('microphone started, ctx rate:', ctx.sampleRate, 'state:', ctx.state);
     } catch (err) {
+      // Distinguish a genuine permission denial from a transient device error
+      // so the user gets actionable guidance instead of a generic failure.
+      const name = err instanceof DOMException ? err.name : '';
+      const message =
+        name === 'NotAllowedError'
+          ? 'Microphone permission denied. Allow access in your browser settings, then try again.'
+          : name === 'NotFoundError' || name === 'DevicesNotReadableError'
+            ? 'No microphone detected. Connect a microphone or use a different browser.'
+            : err instanceof Error
+              ? err.message
+              : 'Failed to access microphone';
       setState((prev) => ({
         ...prev,
-        error: err instanceof Error ? err.message : 'Failed to access microphone',
+        error: message,
       }));
       setStatus('error');
     }
