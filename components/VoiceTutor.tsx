@@ -214,7 +214,10 @@ export function VoiceTutor() {
     );
   }
 
-  if (!user) {
+  // Guest mode starts the session without ever setting `user`, so the guard
+  // must also accept isGuest — otherwise the agent speaks but the UI stays on
+  // the auth screen forever.
+  if (!user && !isGuest) {
     return (
       <div className="w-full">
         {authError && (
@@ -315,9 +318,11 @@ export function VoiceTutor() {
           <h1 className="text-xl sm:text-2xl font-mono font-bold text-terminal-accent truncate">Voice Tutor</h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
-            {user.email}
-          </span>
+          {!isGuest && user && (
+            <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
+              {user.email}
+            </span>
+          )}
           <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
           {!isGuest && (
             <button
