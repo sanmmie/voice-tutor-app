@@ -386,17 +386,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   connectRef.current = connect;
 
   // --- Start Microphone ---
-  const startMicrophone = useCallback(async () => {
-    if (audioContextRef.current && micStreamRef.current) return;
-
+  // Acquire the mic stream. This MUST run while a user gesture is still active:
+  // getUserMedia requires transient user activation on desktop Chrome/Firefox,
+  // and any `await` that yields the event loop consumes that activation. The
+  // previous flow did fetch → await connect → await getUserMedia, so by the
+  // time the mic request fired the gesture was gone and desktop browsers
+  // threw "NotFoundError" / "No microphone detected" — even though Android
+  // Chrome (which is lenient about gesture timing) worked fine. Callers must
+  // invoke this synchronously after a user gesture, before any await.
+  const acquireMicStream = useCallback(async (): Promise<MediaStream | null> => {
+    if (micStreamRef.current) return micStreamRef.current;
+    const ctx = await ensureAudioContext();
     try {
-      const ctx = await ensureAudioContext();
-      // NOTE: do NOT set noiseSuppression: false. Explicitly disabling it is a
-      // known Chrome desktop failure mode — when the audio processing module
-      // isn't available (virtual audio drivers, some laptops, headless CI),
-      // the constraint throws "Requested device not found" even though a real
-      // microphone is present. Letting Chrome use its default (enabled) is
-      // both more reliable and gives better voice quality for the tutor.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -405,56 +406,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
         },
       });
       micStreamRef.current = stream;
-
-      const source = ctx.createMediaStreamSource(stream);
-      const processor = ctx.createScriptProcessor(2048, 1, 1);
-      processorRef.current = processor;
-
-      let pcmBuffer = new Int16Array(0);
-      let captureCount = 0;
-
-      processor.onaudioprocess = (e) => {
-        captureCount++;
-        if (DEBUG && captureCount % 100 === 0) {
-          log('mic capture alive, callbacks:', captureCount);
-        }
-
-        const inputData = e.inputBuffer.getChannelData(0);
-        const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
-        const int16 = float32ToInt16(resampled);
-
-        const newBuffer = new Int16Array(pcmBuffer.length + int16.length);
-        newBuffer.set(pcmBuffer);
-        newBuffer.set(int16, pcmBuffer.length);
-        pcmBuffer = newBuffer;
-
-        while (pcmBuffer.length >= CHUNK_SAMPLES) {
-          const chunk = pcmBuffer.slice(0, CHUNK_SAMPLES);
-          pcmBuffer = pcmBuffer.slice(CHUNK_SAMPLES);
-          const base64 = int16ToBase64(chunk);
-
-          if (wsRef.current?.readyState === WebSocket.OPEN && !endingRef.current) {
-            wsRef.current.send(JSON.stringify({ type: 'input.audio', audio: base64 }));
-          }
-        }
-      };
-
-      source.connect(processor);
-
-      // FIX: In Chrome, ScriptProcessorNode.onaudioprocess does NOT fire unless
-      // the node is connected downstream to AudioDestinationNode. Route the
-      // output through a silent gain node so we satisfy that requirement
-      // without playing mic audio back through the speakers (no feedback).
-      const silentGain = ctx.createGain();
-      silentGain.gain.value = 0;
-      processor.connect(silentGain);
-      silentGain.connect(ctx.destination);
-      silentGainRef.current = silentGain;
-
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-      log('microphone started, ctx rate:', ctx.sampleRate, 'state:', ctx.state);
+      return stream;
     } catch (err) {
       // Distinguish a genuine permission denial from a transient device error
       // so the user gets actionable guidance instead of a generic failure.
@@ -467,13 +419,68 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             : err instanceof Error
               ? err.message
               : 'Failed to access microphone';
-      setState((prev) => ({
-        ...prev,
-        error: message,
-      }));
+      setState((prev) => ({ ...prev, error: message }));
       setStatus('error');
+      return null;
     }
-  }, [ensureAudioContext, setStatus, log]);
+  }, [ensureAudioContext, setStatus]);
+
+  const startMicrophone = useCallback(async () => {
+    const stream = await acquireMicStream();
+    if (!stream) return;
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(2048, 1, 1);
+    processorRef.current = processor;
+
+    let pcmBuffer = new Int16Array(0);
+    let captureCount = 0;
+
+    processor.onaudioprocess = (e) => {
+      captureCount++;
+      if (DEBUG && captureCount % 100 === 0) {
+        log('mic capture alive, callbacks:', captureCount);
+      }
+
+      const inputData = e.inputBuffer.getChannelData(0);
+      const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
+      const int16 = float32ToInt16(resampled);
+
+      const newBuffer = new Int16Array(pcmBuffer.length + int16.length);
+      newBuffer.set(pcmBuffer);
+      newBuffer.set(int16, pcmBuffer.length);
+      pcmBuffer = newBuffer;
+
+      while (pcmBuffer.length >= CHUNK_SAMPLES) {
+        const chunk = pcmBuffer.slice(0, CHUNK_SAMPLES);
+        pcmBuffer = pcmBuffer.slice(CHUNK_SAMPLES);
+        const base64 = int16ToBase64(chunk);
+
+        if (wsRef.current?.readyState === WebSocket.OPEN && !endingRef.current) {
+          wsRef.current.send(JSON.stringify({ type: 'input.audio', audio: base64 }));
+        }
+      }
+    };
+
+    source.connect(processor);
+
+    // FIX: In Chrome, ScriptProcessorNode.onaudioprocess does NOT fire unless
+    // the node is connected downstream to AudioDestinationNode. Route the
+    // output through a silent gain node so we satisfy that requirement
+    // without playing mic audio back through the speakers (no feedback).
+    const silentGain = ctx.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(ctx.destination);
+    silentGainRef.current = silentGain;
+
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    log('microphone started, ctx rate:', ctx.sampleRate, 'state:', ctx.state);
+  }, [acquireMicStream, log]);
 
   // --- Disconnect ---
   const disconnect = useCallback(() => {
@@ -534,6 +541,16 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const startSession = useCallback(async (options: { guest?: boolean } = {}) => {
     endingRef.current = false;
     try {
+      // Acquire the mic stream FIRST, while the user gesture that triggered
+      // this click is still active. getUserMedia requires transient user
+      // activation on desktop Chrome/Firefox, and any `await` below yields
+      // the event loop and consumes that activation — which is exactly why
+      // the previous order (fetch → connect → getUserMedia) failed on
+      // desktop with "No microphone detected" even though Android Chrome
+      // (lenient about gesture timing) worked. Do this before awaiting the
+      // token so the gesture survives.
+      await acquireMicStream();
+
       const tokenUrl = options.guest ? '/api/token?guest=true' : '/api/token';
       const res = await fetch(tokenUrl);
       const data = await res.json();
@@ -548,7 +565,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       }));
       setStatus('error');
     }
-  }, [connect, ensureAudioContext, startMicrophone, setStatus]);
+  }, [acquireMicStream, connect, ensureAudioContext, startMicrophone, setStatus]);
 
   useEffect(() => {
     return () => { disconnect(); };
