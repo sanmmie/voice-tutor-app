@@ -54,14 +54,16 @@ export function TranscriptList({ userTranscripts, agentTranscripts }: Transcript
                   : 'bg-terminal-surface text-terminal-text border border-terminal-border'
               }`}
             >
-              <span className="text-xs text-terminal-muted block mb-0.5">
-                {isUser ? '🧑 You' : '🧑‍🏫 Tutor'}
-                {isPartial && ' (typing...)'}
-              </span>
-              <span className="whitespace-pre-wrap break-words">{msg.text}</span>
+                <span className="text-xs text-terminal-muted block mb-0.5">
+                  <span aria-hidden="true">{isUser ? '🧑' : '🏫'}</span>{' '}
+                  <span className="visually-hidden">{isUser ? 'You' : 'Tutor'}</span>
+                  {isUser ? 'You' : 'Tutor'}
+                  {isPartial && ' (typing...)'}
+                </span>
+                <span className="whitespace-pre-wrap break-words">{msg.text}</span>
+              </div>
             </div>
-          </div>
-        );
+          );
       })}
     </div>
   );

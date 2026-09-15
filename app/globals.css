@@ -48,16 +48,16 @@ body {
 
 /* ---------- Focus visibility ----------
    The default browser outline is disabled across the codebase
-   (`outline-none` on inputs/buttons). Replace it with a visible, always-on
-   focus ring so keyboard users can navigate. The ring is subtle by default
-   and only appears on keyboard focus (not on click) via :focus-within. */
+   (`outline-none` on inputs/buttons). Replace it with a visible focus ring so
+   keyboard users can navigate. NOTE: prefers-high-contrast is Chromium-only —
+   Firefox and Safari do not support it, so the fallback below uses the
+   forced-colors media query (supported in all modern browsers) instead. */
 :focus-visible {
   outline: 2px solid #6ee7b7;
   outline-offset: 2px;
 }
 
-/* Make sure focus rings never disappear in Windows high-contrast mode. */
-@media (prefers-high-contrast) {
+@media (prefers-high-contrast), (forced-colors: active) {
   :focus-visible {
     outline: 2px solid Highlight;
     outline-offset: 0;
