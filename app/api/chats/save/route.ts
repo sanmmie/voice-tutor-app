@@ -15,6 +15,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const id = typeof body?.id === 'string' ? body.id : '';
+    // An empty id is not a valid chat key: it maps to `chat:` which collides
+    // with the `chat:*` scan prefix used by listChats, and `chat::owner` is a
+    // phantom ownership key. Reject it explicitly instead of letting it
+    // silently corrupt the chat namespace.
+    if (!id || !/^[1-9]\d*$/.test(id)) {
+      return apiResponse(request, '/api/chats/save', requestId, 400, startedAt, { error: 'Invalid chat id' });
+    }
     const title = typeof body?.title === 'string' ? body.title : '';
     const language = typeof body?.language === 'string' ? body.language : '';
     const messages = body?.messages;

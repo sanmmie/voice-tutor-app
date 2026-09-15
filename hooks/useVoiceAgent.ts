@@ -254,28 +254,37 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
           // On interrupt the agent stops speaking but still expects results for
           // any in-flight tool calls, so we send an error envelope instead of
           // silently discarding them — otherwise the session hangs.
+          //
+          // AWAIT each promise before sending. The previous implementation used
+          // `.then()` fire-and-forget with a guard that dropped results whose
+          // socket had since closed. That is wrong: a tool still executing when
+          // `reply.done` arrives (common — Wikipedia takes 1-2s) resolves after
+          // the socket is gone, the guard dropped the result, and the agent
+          // hung until its own tool timeout. The agent is literally waiting on
+          // us, so we must not send until the result is ready.
           const interrupted = data.status === 'interrupted';
           if (interrupted) stopAllPlayback();
 
           const entries = Array.from(pendingToolResultsRef.current.entries());
           pendingToolResultsRef.current.clear();
           for (const [callId, resultPromise] of entries) {
-            resultPromise.then((toolResult) => {
-              const sock = wsRef.current;
-              // Never write to a socket that is gone, closed, or whose session
-              // is tearing down. Without this guard a late tool result can throw
-              // "WebSocket is not open" (or worse, be sent to a replacement socket).
-              if (!sock || sock.readyState !== WebSocket.OPEN || endingRef.current) return;
-              const isError = interrupted || toolResult.isError;
-              const envelope = isError
-                ? { error: interrupted ? 'Interrupted by user' : (toolResult.error as string) }
-                : toolResult.result;
-              sock.send(JSON.stringify({
-                type: 'tool.result',
-                call_id: callId,
-                result: JSON.stringify(envelope),
-              }));
-            });
+            let toolResult: { result: unknown; isError: boolean; error?: string } | null = null;
+            try {
+              toolResult = await resultPromise;
+            } catch {
+              toolResult = { result: { error: 'Tool failed' }, isError: true, error: 'Tool failed' };
+            }
+            const sock = wsRef.current;
+            if (!sock || sock.readyState !== WebSocket.OPEN || endingRef.current) return;
+            const isError = interrupted || toolResult.isError;
+            const envelope = isError
+              ? { error: interrupted ? 'Interrupted by user' : (toolResult.error as string) }
+              : toolResult.result;
+            sock.send(JSON.stringify({
+              type: 'tool.result',
+              call_id: callId,
+              result: JSON.stringify(envelope),
+            }));
           }
           break;
         }
@@ -294,11 +303,18 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
             isError: boolean;
             error?: string;
           }> => {
+            // The server already races executeTool against a 5s timeout, but a
+            // hung connect or a stalled response body would leave this promise
+            // pending forever — and the `reply.done` drain awaits it, so the
+            // whole session would hang. Bound the client side too.
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), 8000);
             try {
               const res = await fetch('/api/tool', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: data.name, args: data.arguments }),
+                signal: controller.signal,
               });
               const json = await res.json();
               if (!res.ok) throw new Error(json.error || 'Tool execution failed');
@@ -309,6 +325,8 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
               const result = { error: errorMsg };
               updateToolCallResult(data.call_id, result, 'error');
               return { result, isError: true, error: errorMsg };
+            } finally {
+              window.clearTimeout(timer);
             }
           })();
           pendingToolResultsRef.current.set(data.call_id, resultPromise);
