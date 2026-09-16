@@ -410,13 +410,13 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       ctx.resume();
     }
 
-    // Probe available devices first. enumerateDevices tells us whether an
-    // audioinput exists BEFORE we call getUserMedia — without this, browsers
-    // that reject the audio constraint when no input is present throw
-    // NotFoundError ("No microphone detected") even though a mic exists,
-    // because the constraint itself is invalid. Also: enumerateDevices only
-    // returns labels after permission is granted, so we tolerate a failure
-    // here and fall back to the raw getUserMedia attempt.
+    // Probe available devices to refine the error message — but do NOT bail
+    // out early. enumerateDevices() omits audioinput devices until the user
+    // has granted microphone permission, so a missing audioinput here does
+    // NOT mean there is no microphone; it means permission hasn't been asked
+    // for yet. Calling getUserMedia first is what triggers the permission
+    // prompt and makes the device appear. So: always attempt getUserMedia,
+    // and only use the probe to pick a clearer error message if it fails.
     let hasAudioInput = true;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -424,13 +424,6 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     } catch {
       // Enumeration failed (e.g. insecure context) — proceed to the raw
       // attempt and let getUserMedia's own error message guide the user.
-    }
-    if (!hasAudioInput) {
-      const message =
-        'No microphone detected on this device. Connect a microphone or use a different browser.';
-      setState((prev) => ({ ...prev, error: message }));
-      setStatus('error');
-      return null;
     }
 
     // Try progressively simpler constraints. Some audio drivers reject the
@@ -463,18 +456,22 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     }
 
     // All attempts failed. Distinguish the failure mode so the user gets
-    // actionable guidance instead of a generic message.
+    // actionable guidance instead of a generic message. If enumerateDevices
+    // also showed no audioinput, the machine genuinely has no mic; otherwise
+    // the failure is a driver/permission issue worth retrying.
     const name = lastError instanceof DOMException ? lastError.name : '';
     const message =
       name === 'NotAllowedError'
         ? 'Microphone permission denied. Allow access in your browser settings, then try again.'
-        : name === 'NotFoundError'
-          ? 'No microphone detected. Connect a microphone or use a different browser.'
-          : name === 'NotReadableError'
-            ? 'Your microphone is in use by another application. Close it and try again.'
-            : lastError instanceof Error
-              ? lastError.message
-              : 'Failed to access microphone';
+        : !hasAudioInput
+          ? 'No microphone detected on this device. Connect a microphone or use a different browser.'
+          : name === 'NotFoundError'
+            ? 'Could not open the microphone. Try a different browser or restart the app.'
+            : name === 'NotReadableError'
+              ? 'Your microphone is in use by another application. Close it and try again.'
+              : lastError instanceof Error
+                ? lastError.message
+                : 'Failed to access microphone';
     setState((prev) => ({ ...prev, error: message }));
     setStatus('error');
     return null;
