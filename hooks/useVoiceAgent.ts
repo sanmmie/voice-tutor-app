@@ -409,32 +409,75 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       // is the first await below so the gesture survives.
       ctx.resume();
     }
+
+    // Probe available devices first. enumerateDevices tells us whether an
+    // audioinput exists BEFORE we call getUserMedia — without this, browsers
+    // that reject the audio constraint when no input is present throw
+    // NotFoundError ("No microphone detected") even though a mic exists,
+    // because the constraint itself is invalid. Also: enumerateDevices only
+    // returns labels after permission is granted, so we tolerate a failure
+    // here and fall back to the raw getUserMedia attempt.
+    let hasAudioInput = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          autoGainControl: true,
-        },
-      });
-      micStreamRef.current = stream;
-      return stream;
-    } catch (err) {
-      // Distinguish a genuine permission denial from a transient device error
-      // so the user gets actionable guidance instead of a generic failure.
-      const name = err instanceof DOMException ? err.name : '';
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      hasAudioInput = devices.some((d) => d.kind === 'audioinput');
+    } catch {
+      // Enumeration failed (e.g. insecure context) — proceed to the raw
+      // attempt and let getUserMedia's own error message guide the user.
+    }
+    if (!hasAudioInput) {
       const message =
-        name === 'NotAllowedError'
-          ? 'Microphone permission denied. Allow access in your browser settings, then try again.'
-          : name === 'NotFoundError' || name === 'DevicesNotReadableError'
-            ? 'No microphone detected. Connect a microphone or use a different browser.'
-            : err instanceof Error
-              ? err.message
-              : 'Failed to access microphone';
+        'No microphone detected on this device. Connect a microphone or use a different browser.';
       setState((prev) => ({ ...prev, error: message }));
       setStatus('error');
       return null;
     }
+
+    // Try progressively simpler constraints. Some audio drivers reject the
+    // processing flags (echoCancellation/autoGainControl/noiseSuppression)
+    // entirely, which surfaces as NotFoundError even when a mic is present.
+    // Starting from the most permissive constraint and loosening on failure
+    // maximizes the chance of getting a stream on the first try.
+    const attempts: MediaTrackConstraints[] = [
+      { channelCount: 1, echoCancellation: true, autoGainControl: true },
+      { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      { channelCount: 1 },
+      { channelCount: 1, deviceId: 'default' },
+    ];
+
+    let lastError: unknown = null;
+    for (const constraints of attempts) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        micStreamRef.current = stream;
+        return stream;
+      } catch (err) {
+        lastError = err;
+        const name = err instanceof DOMException ? err.name : '';
+        // NotAllowedError means the user denied permission — loosening the
+        // constraint won't help, so stop retrying.
+        if (name === 'NotAllowedError') break;
+        // NotFoundError/NotReadableError may recover with a simpler constraint,
+        // so continue to the next attempt.
+      }
+    }
+
+    // All attempts failed. Distinguish the failure mode so the user gets
+    // actionable guidance instead of a generic message.
+    const name = lastError instanceof DOMException ? lastError.name : '';
+    const message =
+      name === 'NotAllowedError'
+        ? 'Microphone permission denied. Allow access in your browser settings, then try again.'
+        : name === 'NotFoundError'
+          ? 'No microphone detected. Connect a microphone or use a different browser.'
+          : name === 'NotReadableError'
+            ? 'Your microphone is in use by another application. Close it and try again.'
+            : lastError instanceof Error
+              ? lastError.message
+              : 'Failed to access microphone';
+    setState((prev) => ({ ...prev, error: message }));
+    setStatus('error');
+    return null;
   }, [setStatus]);
 
   const startMicrophone = useCallback(async () => {
