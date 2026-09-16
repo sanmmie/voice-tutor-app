@@ -131,11 +131,21 @@ export function isSameOrigin(request: NextRequest): boolean {
   if (origin === requestOrigin) return true;
 
   if (process.env.NODE_ENV !== 'production') {
-    const allowedDevOrigins = (process.env.DEV_ALLOWED_ORIGINS ||
-      'http://localhost:3000,http://127.0.0.1:3000,http://192.168.43.191:3000')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
+    // DEV_ALLOWED_ORIGINS is an env override; when unset, allow localhost and
+    // any LAN host instead of a single hardcoded IP. The previous fallback
+    // pinned 192.168.43.191, which only matched one machine — anyone else's
+    // device was blocked from the dev server.
+    const envOrigins = process.env.DEV_ALLOWED_ORIGINS;
+    const allowedDevOrigins = envOrigins
+      ? envOrigins.split(',').map((value) => value.trim()).filter(Boolean)
+      : [
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          'http://[::1]:3000',
+          'http://192.168.0.0/16:3000',
+          'http://10.0.0.0/8:3000',
+          'http://172.16.0.0/12:3000',
+        ];
     return allowedDevOrigins.includes(origin);
   }
 
