@@ -396,7 +396,19 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   // invoke this synchronously after a user gesture, before any await.
   const acquireMicStream = useCallback(async (): Promise<MediaStream | null> => {
     if (micStreamRef.current) return micStreamRef.current;
-    const ctx = await ensureAudioContext();
+    // Create the AudioContext SYNCHRONOUSLY — do not await ensureAudioContext
+    // here, because it awaits ctx.resume() which yields the event loop and
+    // consumes the user gesture before getUserMedia fires. Setting up the
+    // context synchronously keeps the gesture alive for the mic request.
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') {
+      // Fire-and-forget resume: it resolves asynchronously, and getUserMedia
+      // is the first await below so the gesture survives.
+      ctx.resume();
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -423,7 +435,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       setStatus('error');
       return null;
     }
-  }, [ensureAudioContext, setStatus]);
+  }, [setStatus]);
 
   const startMicrophone = useCallback(async () => {
     const stream = await acquireMicStream();
