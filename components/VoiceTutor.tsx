@@ -11,6 +11,7 @@ import { ToolCallCard } from './ToolCallCard';
 import { Logo } from './Logo';
 import { Sidebar } from './Sidebar';
 import { PDFViewer } from './PDFViewer';
+import { LandingPage } from './LandingPage';
 
 export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
@@ -27,6 +28,7 @@ export function VoiceTutor() {
   const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent({
     learningLevel,
     learningPath,
+    isGuest,
   });
 
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -250,24 +252,15 @@ export function VoiceTutor() {
 
   if (!user && !isGuest) {
     return (
-      <div className="w-full">
-        {authError && (
-          <p className="mb-4 text-center text-sm text-red-400" role="alert">
-            Could not check your account. You can still try signing in.
-            <button type="button" onClick={retryAuth} className="ml-2 underline hover:text-red-300">
-              Retry
-            </button>
-          </p>
-        )}
-        <AuthPanel
-          onAuthenticated={(authenticatedUser) => {
-            setAuthError(false);
-            setIsGuest(false);
-            setUser(authenticatedUser);
-          }}
-          onGuest={startGuestSession}
-        />
-      </div>
+      <LandingPage
+        isGuest={false}
+        onGuestSession={startGuestSession}
+        onAuthenticated={(authenticatedUser) => {
+          setAuthError(false);
+          setIsGuest(false);
+          setUser(authenticatedUser);
+        }}
+      />
     );
   }
 
@@ -295,6 +288,7 @@ export function VoiceTutor() {
           onPathChange={handlePathChange}
           onDocumentReady={handleDocumentReady}
           onOpenPdfViewer={openPdfViewer}
+          isGuest={isGuest}
         />
       )}
 

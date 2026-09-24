@@ -16,10 +16,11 @@ interface UseVoiceAgentOptions {
   onStatusChange?: (status: VoiceAgentState['status']) => void;
   learningLevel?: LearningLevel;
   learningPath?: LearningPath;
+  isGuest?: boolean;
 }
 
 export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
-  const { onStatusChange, onTranscript, onToolCall, learningLevel = 'basic', learningPath = 'general' } = options;
+  const { onStatusChange, onTranscript, onToolCall, learningLevel = 'basic', learningPath = 'general', isGuest = false } = options;
   const [state, setState] = useState<VoiceAgentState>({
     status: 'idle',
     sessionId: null,
@@ -315,11 +316,23 @@ ws.onopen = () => {
             try {
               const res = await fetch('/api/tool', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                  'Content-Type': 'application/json',
+                  ...(isGuest ? { 'x-guest-mode': 'true' } : {})
+                },
                 body: JSON.stringify({ name: data.name, args: data.arguments }),
                 signal: controller.signal,
               });
-              const json = await res.json();
+              
+              let json;
+              const contentType = res.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                json = await res.json();
+              } else {
+                const text = await res.text();
+                throw new Error(`Server error (${res.status}): ${text.slice(0, 200)}`);
+              }
+              
               if (!res.ok) throw new Error(json.error || 'Tool execution failed');
               updateToolCallResult(data.call_id, json.result, 'success');
               return { result: json.result, isError: false };
@@ -384,7 +397,7 @@ ws.onopen = () => {
       setStatus('error');
       setState((prev) => ({ ...prev, error: 'WebSocket error occurred.' }));
     };
-  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus, stopAllPlayback, log, learningLevel, learningPath]);
+  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus, stopAllPlayback, log, learningLevel, learningPath, isGuest]);
 
   connectRef.current = connect;
 

@@ -6,6 +6,7 @@ import { setDocumentContent, clearDocumentContent } from '@/lib/tools';
 interface DocumentUploadProps {
   onDocumentReady?: (name: string, type: 'image' | 'pdf') => void;
   onOpenPdfViewer?: (src: string, fileName: string) => void;
+  isGuest?: boolean;
 }
 
 const ALLOWED_TYPES = [
@@ -50,7 +51,7 @@ function CheckIcon() {
   );
 }
 
-export function DocumentUpload({ onDocumentReady, onOpenPdfViewer }: DocumentUploadProps) {
+export function DocumentUpload({ onDocumentReady, onOpenPdfViewer, isGuest = false }: DocumentUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -115,7 +116,10 @@ export function DocumentUpload({ onDocumentReady, onOpenPdfViewer }: DocumentUpl
 
       const response = await fetch('/api/vision', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(isGuest ? { 'x-guest-mode': 'true' } : {})
+        },
         body: JSON.stringify({
           base64,
           mimeType: file.type,
@@ -123,7 +127,14 @@ export function DocumentUpload({ onDocumentReady, onOpenPdfViewer }: DocumentUpl
         }),
       });
 
-      const data = await response.json();
+      let data;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(`Server error (${response.status}): ${text.slice(0, 200)}`);
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to process document');
@@ -139,7 +150,7 @@ export function DocumentUpload({ onDocumentReady, onOpenPdfViewer }: DocumentUpl
     } finally {
       setProcessing(false);
     }
-  }, [file, onDocumentReady]);
+  }, [file, onDocumentReady, isGuest]);
 
   if (!file) {
     return (

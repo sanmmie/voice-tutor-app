@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { extractDocumentContent, extractPdfContent } from '@/lib/vision';
-import { apiResponse, enforceRateLimit, getAuthenticatedUserId, getRequestId, isSameOrigin } from '@/lib/security';
+import { apiResponse, enforceRateLimit, getAuthenticatedUserId, getClientIp, getRequestId, isSameOrigin } from '@/lib/security';
 
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB for base64 images/PDFs
+const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB for base64 images/PDFs
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
@@ -12,12 +12,18 @@ export async function POST(request: NextRequest) {
     return apiResponse(request, '/api/vision', requestId, 403, startedAt, { error: 'Forbidden' });
   }
 
-  const userId = await getAuthenticatedUserId(request);
-  if (!userId) {
+  // Guest mode: check for guest header or query param
+  const url = new URL(request.url);
+  const isGuest = request.headers.get('x-guest-mode') === 'true' || url.searchParams.get('guest') === 'true';
+  
+  let userId = await getAuthenticatedUserId(request);
+  if (!userId && !isGuest) {
     return apiResponse(request, '/api/vision', requestId, 401, startedAt, { error: 'Unauthorized' });
   }
 
-  const rate = await enforceRateLimit(request, 'vision', 10, userId);
+  // Use a guest identifier for rate limiting if no userId
+  const rateLimitIdentifier = userId || getClientIp(request);
+  const rate = await enforceRateLimit(request, 'vision', 10, rateLimitIdentifier);
   if (!rate.success) {
     return apiResponse(request, '/api/vision', requestId, 429, startedAt, { error: 'Too many requests' }, {
       headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },

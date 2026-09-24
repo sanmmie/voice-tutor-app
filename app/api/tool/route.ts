@@ -1,18 +1,29 @@
 import { NextRequest } from 'next/server';
 import { executeTool } from '@/lib/tools';
-import { apiResponse, enforceRateLimit, getAuthenticatedUserId, getRequestId, isSameOrigin } from '@/lib/security';
+import { apiResponse, enforceRateLimit, getAuthenticatedUserId, getClientIp, getRequestId, isSameOrigin } from '@/lib/security';
 
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 128 * 1024; // 128KB for tool calls
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const requestId = getRequestId(request);
-  const userId = await getAuthenticatedUserId(request);
-  if (!isSameOrigin(request) || !userId) {
+
+  if (!isSameOrigin(request)) {
     return apiResponse(request, '/api/tool', requestId, 403, startedAt, { error: 'Forbidden' });
   }
 
-  const rate = await enforceRateLimit(request, 'tool', 60, userId);
+  // Guest mode: check for guest header or query param
+  const url = new URL(request.url);
+  const isGuest = request.headers.get('x-guest-mode') === 'true' || url.searchParams.get('guest') === 'true';
+  
+  let userId = await getAuthenticatedUserId(request);
+  if (!userId && !isGuest) {
+    return apiResponse(request, '/api/tool', requestId, 401, startedAt, { error: 'Unauthorized' });
+  }
+
+  // Use a guest identifier for rate limiting if no userId
+  const rateLimitIdentifier = userId || getClientIp(request);
+  const rate = await enforceRateLimit(request, 'tool', 60, rateLimitIdentifier);
   if (!rate.success) {
     return apiResponse(request, '/api/tool', requestId, 429, startedAt, { error: 'Too many requests' }, {
       headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },
@@ -45,9 +56,6 @@ export async function POST(request: NextRequest) {
     return apiResponse(request, '/api/tool', requestId, 200, startedAt, { result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Tool execution failed';
-    // A timeout or any other server-side failure is a 5xx, not a client
-    // error — the client surfaces the message verbatim either way, but the
-    // status code should reflect what actually went wrong.
     const status = /timed? out|timeout/i.test(message) ? 504 : 500;
     return apiResponse(request, '/api/tool', requestId, status, startedAt, { error: message });
   }

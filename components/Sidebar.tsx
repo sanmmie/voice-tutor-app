@@ -26,6 +26,7 @@ interface SidebarProps {
   onPathChange: (path: 'python' | 'web' | 'algorithms' | 'math' | 'general') => void;
   onDocumentReady?: (name: string, type: 'image' | 'pdf') => void;
   onOpenPdfViewer?: (src: string, fileName: string) => void;
+  isGuest?: boolean;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -101,6 +102,7 @@ export function Sidebar({
   onPathChange,
   onDocumentReady,
   onOpenPdfViewer,
+  isGuest = false,
 }: SidebarProps) {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -271,6 +273,7 @@ export function Sidebar({
             <DocumentUpload 
               onDocumentReady={onDocumentReady} 
               onOpenPdfViewer={onOpenPdfViewer}
+              isGuest={isGuest}
             />
           </div>
           
