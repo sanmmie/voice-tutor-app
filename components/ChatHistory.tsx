@@ -155,7 +155,7 @@ export function ChatHistory({
           <div className="flex items-center justify-between p-4 border-b border-terminal-border">
             <Image
               src="/deltaos-core.svg"
-              alt="DeltaOS Core"
+              alt="Syntax"
               width={28}
               height={28}
               className="delta-glow"

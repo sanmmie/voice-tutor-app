@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ToolCall, ToolCallUI, TranscriptMessage, VoiceAgentState } from '@/lib/types';
 import { toolDefinitions } from '@/lib/tools';
-import { agentConfig } from '@/lib/agent-config';
+import { agentConfig, buildSystemPrompt, LearningLevel, LearningPath } from '@/lib/agent-config';
 import { float32ToInt16, int16ToBase64, resampleFloat32, base64ToFloat32 } from '@/utils/audio';
 
 const DEBUG = false; // flip to true to log mic-capture heartbeats + WS events
@@ -14,10 +14,12 @@ interface UseVoiceAgentOptions {
   onTranscript?: (msg: TranscriptMessage) => void;
   onToolCall?: (call: ToolCallUI) => void;
   onStatusChange?: (status: VoiceAgentState['status']) => void;
+  learningLevel?: LearningLevel;
+  learningPath?: LearningPath;
 }
 
 export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
-  const { onStatusChange, onTranscript, onToolCall } = options;
+  const { onStatusChange, onTranscript, onToolCall, learningLevel = 'basic', learningPath = 'general' } = options;
   const [state, setState] = useState<VoiceAgentState>({
     status: 'idle',
     sessionId: null,
@@ -170,16 +172,17 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
     const ws = new WebSocket(`wss://agents.assemblyai.com/v1/ws?token=${token}`);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+ws.onopen = () => {
       setStatus('connected');
       log('WebSocket open, sending session config');
+      const systemPrompt = buildSystemPrompt(learningLevel, learningPath);
       ws.send(JSON.stringify(resume && sessionIdRef.current
         ? { type: 'session.resume', session_id: sessionIdRef.current }
         : {
-          type: 'session.update',
-          session: {
-            system_prompt: agentConfig.systemPrompt,
-            greeting: agentConfig.greeting,
+            type: 'session.update',
+            session: {
+              system_prompt: systemPrompt,
+              greeting: agentConfig.greeting,
             input: {
               // `audio/pcm` is the documented default encoding for 24 kHz mono
               // PCM16. Do not change it to `audio/pcm16` — that token is not
@@ -381,7 +384,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
       setStatus('error');
       setState((prev) => ({ ...prev, error: 'WebSocket error occurred.' }));
     };
-  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus, stopAllPlayback, log]);
+  }, [playAudioChunk, addUserTranscript, addAgentTranscript, addToolCall, updateToolCallResult, setStatus, stopAllPlayback, log, learningLevel, learningPath]);
 
   connectRef.current = connect;
 

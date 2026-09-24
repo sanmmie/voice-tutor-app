@@ -41,7 +41,7 @@ export function Controls({ isConnected, isRecording, onStart, onStop, status }: 
           }`}
         >
           <MicIcon />
-          {isBusy ? 'Starting...' : 'Start Tutoring'}
+          {isBusy ? 'Starting...' : 'Start Session'}
         </button>
       )}
 

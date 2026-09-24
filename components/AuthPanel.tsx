@@ -108,7 +108,7 @@ export function AuthPanel({ onAuthenticated, onGuest }: AuthPanelProps) {
 
   return (
     <main className="w-full max-w-md rounded-xl border border-terminal-border bg-terminal-surface/50 p-6">
-      <h1 className="text-2xl font-mono font-bold text-terminal-accent">Voice Tutor</h1>
+      <h1 className="text-2xl font-mono font-bold text-terminal-accent">Syntax</h1>
       <p className="mt-2 text-sm text-terminal-muted">Sign in to start a private tutoring session.</p>
       <div role="tablist" aria-label="Authentication mode" className="mt-6 flex border-b border-terminal-border">
         {(['login', 'register'] as const).map((option) => (

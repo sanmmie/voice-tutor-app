@@ -9,11 +9,20 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'DeltaOS Core — Voice Tutor',
-  description: 'A voice-based coding and math tutor powered by DeltaOS Core and AssemblyAI.',
-  // Tell browsers to render the chrome in dark mode to match the UI.
+  title: 'Syntax — learn to code, out loud',
+  description: 'A voice-based coding tutor. Speak naturally, learn by voice. Upload images/PDFs, select your level, and export sessions.',
+  openGraph: {
+    title: 'Syntax — learn to code, out loud',
+    description: 'A voice-based coding tutor. Speak naturally, learn by voice.',
+    type: 'website',
+  },
   other: {
     'color-scheme': 'dark',
+  },
+  icons: {
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+    apple: '/favicon.svg',
   },
 };
 

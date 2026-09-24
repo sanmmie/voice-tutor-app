@@ -1,6 +1,20 @@
 import { evaluate } from 'mathjs';
 import { ToolDefinition } from './types';
 
+let documentStore: { content: string; type: 'image' | 'pdf'; name: string } | null = null;
+
+export function setDocumentContent(content: string, type: 'image' | 'pdf', name: string) {
+  documentStore = { content, type, name };
+}
+
+export function getDocumentContent() {
+  return documentStore;
+}
+
+export function clearDocumentContent() {
+  documentStore = null;
+}
+
 // --- Tool Definitions (sent to AssemblyAI in session.update) ---
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -52,6 +66,16 @@ export const toolDefinitions: ToolDefinition[] = [
         },
       },
       required: ['concept'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'read_document',
+    description: 'Read the content of an uploaded document (image or PDF) that the user has shared. Use this when the user references an uploaded file, asks about a diagram, code screenshot, or handwritten problem they shared.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
     },
   },
 ];
@@ -157,6 +181,22 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         language,
         found: true,
         code,
+      };
+    }
+
+    case 'read_document': {
+      const doc = getDocumentContent();
+      if (!doc) {
+        return {
+          found: false,
+          message: 'No document has been uploaded yet. Please upload an image or PDF first.',
+        };
+      }
+      return {
+        found: true,
+        type: doc.type,
+        name: doc.name,
+        content: doc.content,
       };
     }
 

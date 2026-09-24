@@ -8,25 +8,31 @@ import { Controls } from './Controls';
 import { StatusBar } from './StatusBar';
 import { TranscriptList } from './TranscriptList';
 import { ToolCallCard } from './ToolCallCard';
-import { ChatHistory } from './ChatHistory';
 import { Logo } from './Logo';
+import { Sidebar } from './Sidebar';
+import { PDFViewer } from './PDFViewer';
 
 export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
-  const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
-  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>('basic');
+  const [learningPath, setLearningPath] = useState<'python' | 'web' | 'algorithms' | 'math' | 'general'>('general');
+  const [pdfViewer, setPdfViewer] = useState<{ src: string; fileName: string } | null>(null);
+
+  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent({
+    learningLevel,
+    learningPath,
+  });
 
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedChatRef = useRef(false);
+  const sessionRestartRef = useRef(false);
 
-  // Guest mode: skip registration entirely. The token endpoint accepts
-  // ?guest=true (rate-limited, shorter TTL) so unauthenticated judges can
-  // reach the tutor immediately. Guest sessions have no chat history.
   const startGuestSession = useCallback(async () => {
     setIsGuest(true);
     setAuthError(false);
@@ -170,7 +176,6 @@ export function VoiceTutor() {
           isFinal: true,
         }));
 
-      // Restore the saved conversation into the live UI before reconnecting.
       setTranscripts(userMessages, agentMessages);
       setCurrentChatId(chatId);
       disconnect();
@@ -195,28 +200,54 @@ export function VoiceTutor() {
         await startSession();
       }
     } catch {
-      // Graceful degradation
       setCurrentChatId(null);
       disconnect();
       await startSession();
     }
   }, [userId, disconnect, startSession]);
 
+  const handleLevelChange = useCallback((level: 'entry' | 'basic' | 'intermediate' | 'advanced') => {
+    setLearningLevel(level);
+    sessionRestartRef.current = true;
+  }, []);
+
+  const handlePathChange = useCallback((path: 'python' | 'web' | 'algorithms' | 'math' | 'general') => {
+    setLearningPath(path);
+    sessionRestartRef.current = true;
+  }, []);
+
+  const handleDocumentReady = useCallback((name: string, type: 'image' | 'pdf') => {
+    if (type === 'pdf') {
+      // For PDFs, we'll open the viewer (handled by DocumentUpload via a different mechanism)
+      // This is a placeholder - the PDF viewer is opened from the upload component
+    }
+  }, []);
+
+  const openPdfViewer = useCallback((src: string, fileName: string) => {
+    setPdfViewer({ src, fileName });
+  }, []);
+
   const retryAuth = () => {
     window.location.reload();
   };
 
+  // Restart session when learning level/path changes
+  useEffect(() => {
+    if (sessionRestartRef.current && (isConnected || isRecording)) {
+      sessionRestartRef.current = false;
+      disconnect();
+      startSession(isGuest ? { guest: true } : undefined);
+    }
+  }, [learningLevel, learningPath, isConnected, isRecording, disconnect, startSession, isGuest]);
+
   if (authLoading) {
     return (
       <div className="font-mono text-terminal-muted" role="status">
-        Loading VoiceTutor...
+        Loading Syntax...
       </div>
     );
   }
 
-  // Guest mode starts the session without ever setting `user`, so the guard
-  // must also accept isGuest — otherwise the agent speaks but the UI stays on
-  // the auth screen forever.
   if (!user && !isGuest) {
     return (
       <div className="w-full">
@@ -241,8 +272,6 @@ export function VoiceTutor() {
   }
 
   const handleStart = () => {
-    // Guest sessions always start fresh; authenticated sessions reuse the
-    // auto-created chat.
     startSession(isGuest ? { guest: true } : undefined);
   };
 
@@ -251,60 +280,39 @@ export function VoiceTutor() {
   };
 
   return (
-    <div
-      className={`relative flex flex-col h-full max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-5 min-h-0 ${
-        chatHistoryOpen ? 'pointer-events-none select-none' : ''
-      }`}
-      aria-hidden={chatHistoryOpen}
-    >
-      {/* Guest sessions have no chat history to browse, so the sidebar is
-          rendered only for authenticated users. */}
+    <div className="relative flex h-full min-h-screen bg-terminal-bg">
+      {/* Sidebar */}
       {!isGuest && (
-        <ChatHistory
+        <Sidebar
           userId={userId || 0}
-          isOpen={chatHistoryOpen}
-          onClose={() => setChatHistoryOpen(false)}
+          currentChatId={currentChatId}
           onSelectChat={handleSelectChat}
           onNewChat={handleNewChat}
-          currentChatId={currentChatId}
+          onClose={() => setSidebarOpen(false)}
+          learningLevel={learningLevel}
+          learningPath={learningPath}
+          onLevelChange={handleLevelChange}
+          onPathChange={handlePathChange}
+          onDocumentReady={handleDocumentReady}
+          onOpenPdfViewer={openPdfViewer}
         />
       )}
 
-      {/* Guest banner — visible so judges know they are not signed in and
-          that their session is ephemeral. */}
-      {isGuest && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-delta-blue-500/30 bg-delta-blue-500/5 px-4 py-2.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-delta-blue-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7V4m0 0L8 12l8 8 8-8-8-8zm0 4v10" />
-            </svg>
-            <span className="text-xs font-mono text-delta-blue-200 truncate">
-              Guest session — conversations are not saved.
-            </span>
-          </div>
+      {/* Main Content */}
+      <main
+        className={`flex-1 flex flex-col min-w-0 ${!isGuest ? 'lg:ml-[320px]' : ''}`}
+        style={{ marginLeft: isGuest ? 0 : sidebarOpen ? '320px' : 0 }}
+      >
+        {/* Mobile sidebar toggle */}
+        <div className="lg:hidden p-3 border-b border-terminal-border bg-terminal-surface">
           <button
             type="button"
-            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
-            className="text-xs font-mono text-delta-blue-300 hover:text-delta-blue-100 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-delta-blue-400 rounded"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            aria-expanded={sidebarOpen}
           >
-            Sign in
-          </button>
-        </div>
-      )}
-
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <button
-            type="button"
-            onClick={() => setChatHistoryOpen((prev) => !prev)}
-            disabled={isGuest}
-            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={chatHistoryOpen ? 'Close chat history' : 'Open chat history'}
-            aria-expanded={chatHistoryOpen}
-            aria-controls="chat-history-panel"
-          >
-            {chatHistoryOpen ? (
+            {sidebarOpen ? (
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -314,78 +322,121 @@ export function VoiceTutor() {
               </svg>
             )}
           </button>
-          <Logo size={32} />
-          <h1 className="text-xl sm:text-2xl font-mono font-bold text-terminal-accent truncate">Voice Tutor</h1>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
-          {!isGuest && user && (
-            <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
-              {user.email}
-            </span>
-          )}
-          <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
-          {!isGuest && (
+
+        {/* Header */}
+        <header className="flex items-center justify-between gap-3 p-3 sm:p-4 border-b border-terminal-border bg-terminal-surface/50 sticky top-0 z-10">
+          <div className="flex items-center gap-2 min-w-0">
+            <Logo size={32} />
+            <h1 className="text-xl sm:text-2xl font-mono font-bold text-terminal-accent truncate">Syntax</h1>
+            <span className="text-xs text-terminal-muted hidden sm:inline">learn to code, out loud</span>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {!isGuest && user && (
+              <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
+                {user.email}
+              </span>
+            )}
+            <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
+            {!isGuest && (
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+                aria-label="New conversation"
+                title="New conversation"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleNewChat}
-              className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
-              aria-label="New conversation"
-              title="New conversation"
+              onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
+              className="px-3 py-2 rounded-lg text-xs font-mono text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
+              {isGuest ? 'Exit guest' : 'Sign out'}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
-            className="px-3 py-2 rounded-lg text-xs font-mono text-terminal-muted hover:text-terminal-accent hover:bg-terminal-surface/60 transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
-          >
-            {isGuest ? 'Exit guest' : 'Sign out'}
-          </button>
-        </div>
-      </header>
-
-      {/* Visualizer */}
-      <div className="flex justify-center">
-        <VoiceVisualizer isActive={isRecording} />
-      </div>
-
-      {/* Controls */}
-      <div className="flex justify-center">
-        <Controls
-          isConnected={isConnected}
-          isRecording={isRecording}
-          onStart={handleStart}
-          onStop={handleStop}
-          status={state.status}
-        />
-      </div>
-
-      {/* Transcripts */}
-      <div className="flex-1 min-h-0 bg-terminal-surface/30 rounded-xl border border-terminal-border p-3 sm:p-4">
-        <TranscriptList
-          userTranscripts={state.userTranscripts}
-          agentTranscripts={state.agentTranscripts}
-        />
-      </div>
-
-      {/* Tool Calls */}
-      {state.toolCalls.length > 0 && (
-        <section aria-label="Tool activity" className="space-y-2">
-          <h2 className="text-sm font-mono text-terminal-muted flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 4a2 2 0 114 0v4a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 114 0v2h2V4z"/>
-            </svg>
-            Tool Activity
-          </h2>
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {state.toolCalls.map((call) => (
-              <ToolCallCard key={call.call_id} call={call} />
-            ))}
           </div>
-        </section>
+        </header>
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden p-3 sm:p-4 space-y-4 min-h-0">
+          {/* Visualizer */}
+          <div className="flex justify-center">
+            <VoiceVisualizer isActive={isRecording} />
+          </div>
+
+          {/* Controls */}
+          <div className="flex justify-center">
+            <Controls
+              isConnected={isConnected}
+              isRecording={isRecording}
+              onStart={handleStart}
+              onStop={handleStop}
+              status={state.status}
+            />
+          </div>
+
+          {/* Transcripts */}
+          <div className="flex-1 min-h-0 bg-terminal-surface/30 rounded-xl border border-terminal-border">
+            <TranscriptList
+              userTranscripts={state.userTranscripts}
+              agentTranscripts={state.agentTranscripts}
+            />
+          </div>
+
+          {/* Tool Calls */}
+          {state.toolCalls.length > 0 && (
+            <section aria-label="Tool activity" className="space-y-2">
+              <h2 className="text-sm font-mono text-terminal-muted flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 4a2 2 0 114 0v4a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 114 0v2h2V4z"/>
+                </svg>
+                Tool Activity
+              </h2>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {state.toolCalls.map((call) => (
+                  <ToolCallCard key={call.call_id} call={call} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        {/* Guest banner */}
+        {isGuest && (
+          <div className="mx-3 mb-3 p-3 rounded-xl border border-delta-blue-500/30 bg-delta-blue-500/5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-delta-blue-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7V4m0 0L8 12l8 8 8-8-8-8zm0 4v10" />
+                </svg>
+                <span className="text-xs font-mono text-delta-blue-200 truncate">
+                  Guest session — conversations are not saved.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
+                className="text-xs font-mono text-delta-blue-300 hover:text-delta-blue-100 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-delta-blue-400 rounded"
+              >
+                Sign in
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* PDF Viewer Modal */}
+      {pdfViewer && (
+        <PDFViewer
+          src={pdfViewer.src}
+          fileName={pdfViewer.fileName}
+          onClose={() => setPdfViewer(null)}
+          onProcessComplete={() => setPdfViewer(null)}
+        />
       )}
     </div>
   );

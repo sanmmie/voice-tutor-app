@@ -1,24 +1,31 @@
-# 🧑‍🏫 Voice Tutor — AssemblyAI Hackathon
+# 🧑‍🏫 Syntax — learn to code, out loud
 
-A voice-based coding and math tutor built with the **AssemblyAI Voice Agent API**. 
+A voice-based coding tutor built with the **AssemblyAI Voice Agent API**. 
 Have natural spoken conversations with an AI tutor that can:
 
 - Explain programming concepts (Python, algorithms, web dev, data structures)
 - Solve math problems step-by-step
 - Search Wikipedia for technical topics
 - Show code examples on demand
-- Provide a patient, encouraging learning experience
+- Read and discuss uploaded images and PDFs
+- Adapt to your learning level (Entry → Advanced)
+- Export sessions to WhatsApp, Email, or GitHub Gist
 
 ## Features
 
 - 🎙️ **Voice-first** — speak naturally, get spoken responses
+- 📸 **Image & PDF understanding** — upload a photo/screenshot/PDF, tutor discusses it by voice
 - 🔧 **Tool calling** — the agent uses real tools:
   - `calculate` — evaluate math expressions
   - `search_docs` — fetch Wikipedia summaries
   - `get_code_example` — retrieve code snippets
+  - `read_document` — read uploaded images/PDFs
 - 📝 **Live transcripts** — see what you and the tutor say
 - ⚡ **Real-time** — low-latency WebSocket streaming
 - 🎨 **Dark terminal UI** — designed for focus and readability
+- 📚 **Learning paths** — Python, Web Dev, Algorithms, Math, or General
+- 📊 **Level selection** — Entry, Basic, Intermediate, Advanced
+- 📤 **Export** — one-click share to WhatsApp, Email, or GitHub Gist
 
 ## Tech Stack
 
@@ -27,6 +34,7 @@ Have natural spoken conversations with an AI tutor that can:
 - **AssemblyAI Voice Agent API** (STT + LLM + TTS + VAD + tool calling)
 - **mathjs** (safe math evaluation)
 - **Wikipedia API** (knowledge retrieval)
+- **react-pdf** (PDF viewing)
 - **Upstash Redis + bcryptjs** (distributed rate limiting and account identity)
 
 ## Getting Started
@@ -52,6 +60,10 @@ NEXT_PUBLIC_TUTOR_SYSTEM_PROMPT=You are a patient, encouraging coding and math m
 NEXT_PUBLIC_TUTOR_GREETING=Hi there! I am your voice tutor. What would you like to learn today?
 NEXT_PUBLIC_TUTOR_VOICE=michael
 DEV_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://192.168.43.191:3000
+# Vision API (for image/PDF understanding)
+VISION_API_KEY=your_openai_or_compatible_api_key
+VISION_MODEL=gpt-4o
+VISION_API_URL=https://api.openai.com/v1/chat/completions
 ```
 
 Get your key from [assemblyai.com/dashboard/api-keys](https://www.assemblyai.com/dashboard/api-keys).
@@ -82,6 +94,8 @@ npm run build
 - `/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, and `/api/auth/me` manage account identity and sessions.
 - `/api/token` requires an authenticated account and is limited to 10 requests per IP per minute.
 - `/api/tool` requires an authenticated account and same-origin requests, and is limited to 60 requests per user per minute.
+- `/api/vision` requires an authenticated account and is limited to 10 requests per user per minute.
+- `/api/gist` requires an authenticated account and is limited to 5 requests per user per minute.
 - Tool execution is capped at five seconds; Wikipedia lookups time out after four seconds, and math expressions are bounded to prevent runaway evaluation.
 - API requests emit structured JSON logs with request ID, route, status, duration, and client IP for ingestion by Vercel Logs or another centralized logging provider.
 - Configure alerts on `/api/health` 5xx responses, elevated authentication or tool `429` responses, and upstream token failures.
@@ -103,7 +117,9 @@ voice-tutor-app/
 │   │   ├── auth/           # Account registration, login, logout, and identity
 │   │   ├── health/         # Deployment health check
 │   │   ├── token/          # Mints temp WebSocket tokens
-│   │   └── tool/           # Executes tool calls server-side
+│   │   ├── tool/           # Executes tool calls server-side
+│   │   ├── vision/         # Multimodal LLM for image/PDF understanding
+│   │   └── gist/           # GitHub Gist creation
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/             # React UI components
@@ -116,8 +132,8 @@ voice-tutor-app/
 
 1. The app fetches a temporary token from `/api/token` using your API key (server-side).
 2. The browser connects to `wss://agents.assemblyai.com/v1/ws?token=...` with the single-use token.
-3. It sends a `session.update` with the system prompt, voice selection, and tool definitions.
-4. Microphone audio is captured at the browser’s native rate, resampled to 24 kHz PCM16, base64-encoded, and sent as `input.audio` events.
+3. It sends a `session.update` with the system prompt (adjusted for level/path), voice selection, and tool definitions.
+4. Microphone audio is captured at the browser's native rate, resampled to 24 kHz PCM16, base64-encoded, and sent as `input.audio` events.
 5. The agent responds with `transcript.agent` and `reply.audio` events (played through speakers).
 6. When the agent needs a tool, it sends `tool.call`; the browser forwards it to `/api/tool`, queues the result, and sends it back as a JSON-string `tool.result` after `reply.done`, as required by the Voice Agent API.
 7. The session ends cleanly when the user clicks "Stop Session".
@@ -132,7 +148,7 @@ This project uses the official [AssemblyAI Voice Agent API](https://www.assembly
 - Client-side function tools run through the authenticated `/api/tool` route and return `tool.result` only after the current `reply.done` event.
 - `session.end` is sent before teardown to avoid the billable reconnect grace period.
 - Intentional teardown waits for `session.ended` before closing the socket, with a two-second fallback for an unresponsive connection.
-- If the WebSocket drops unexpectedly, the client fetches a fresh token and attempts `session.resume` within the provider’s 30-second recovery window. Fatal authentication/protocol closes are not retried.
+- If the WebSocket drops unexpectedly, the client fetches a fresh token and attempts `session.resume` within the provider's 30-second recovery window. Fatal authentication/protocol closes are not retried.
 - Microphone echo cancellation remains enabled, server-side noise suppression is preferred, and audio is resampled for Firefox and Safari compatibility.
 
 The hackathon accepts either the Voice Agent API or the Realtime Speech-to-Text API. This submission uses the Voice Agent API because it provides the complete speech-to-text, LLM routing, voice output, turn-taking, and tool-calling flow in one connection.
@@ -143,21 +159,21 @@ Add a 16:9 cover image and a video presentation of no more than five minutes whe
 
 ## Submission for LabLab.ai x AssemblyAI
 
-- **Application of Technology:** Deep integration with Voice Agent API + 3 custom tools
-- **Presentation:** Clean terminal UI with live transcripts and tool activity
-- **Business Value:** Education — accessible, spoken tutoring for coding & math
-- **Originality:** Pedagogical system prompt + Wikipedia/code/math tools in a voice agent
+- **Application of Technology:** Deep integration with Voice Agent API + 4 custom tools (calculate, search_docs, get_code_example, read_document)
+- **Presentation:** Clean terminal UI with live transcripts, tool activity, PDF viewer, and document upload
+- **Business Value:** Education — accessible, spoken tutoring for coding & math with adaptive level/path
+- **Originality:** Pedagogical system prompt + Wikipedia/code/math/document tools in a voice agent
 
 ## LabLab Submission Checklist
 
-- **Title:** Voice Tutor (under the 50-character limit)
-- **Short description:** A voice tutor for coding and mathematics that explains concepts aloud, solves problems step by step, and retrieves focused examples (under 255 characters)
-- **Long description:** Explain the education problem, the voice-first interaction, AssemblyAI integration, server-side tools, account security, and how the app can scale with Redis-backed limits and sessions. Use at least 100 words.
+- **Title:** Syntax (under the 50-character limit)
+- **Short description:** A voice tutor for coding that explains concepts aloud, solves problems step by step, reads your uploads, and adapts to your level (under 255 characters)
+- **Long description:** Explain the education problem, the voice-first interaction, AssemblyAI integration, server-side tools, account security, document understanding, adaptive learning, export features, and how the app can scale with Redis-backed limits and sessions. Use at least 100 words.
 - **Main tracks:** Education, Voice AI, Developer Tools
-- **Technologies:** Next.js, React, TypeScript, AssemblyAI Voice Agent API, Upstash Redis, bcryptjs, mathjs, Tailwind CSS, Wikipedia API
+- **Technologies:** Next.js, React, TypeScript, AssemblyAI Voice Agent API, Upstash Redis, bcryptjs, mathjs, Tailwind CSS, Wikipedia API, react-pdf
 - **Media:** Upload a 16:9 cover image and link a video under 300 MB and five minutes
 - **Technical details:** Provide the GitHub repository URL, deployed demo platform, live demo URL, environment-variable requirements, and scaling notes
-- **Final checks:** Verify the public demo, microphone permissions, account registration, tool calls, health endpoint, and production logs before submitting
+- **Final checks:** Verify the public demo, microphone permissions, account registration, tool calls, health endpoint, document upload/PDF view, level/path selection, export actions, and production logs before submitting
 
 ## Submission Rules Checklist
 
@@ -166,7 +182,7 @@ Add a 16:9 cover image and a video presentation of no more than five minutes whe
 - **Cover image:** Upload a PNG or JPG image with a 16:9 aspect ratio.
 - **Presentation:** Prepare an MP4 video presentation and a PDF slide presentation as required submission materials.
 - **Application:** Provide a public GitHub repository, deploy the demo on an accepted platform such as Vercel, and include the live application URL for interactive evaluation.
-- **Judging criteria:** Explain the project’s presentation quality, business value, application of technology, and originality in the submission.
+- **Judging criteria:** Explain the project's presentation quality, business value, application of technology, and originality in the submission.
 - **Manual submission:** Manual submission is available for up to six hours after the hackathon only for valid reasons with prior organizer or mentor approval.
 - **Ethical conduct:** Do not plagiarize, manipulate voting, tamper with systems, use unauthorized automation, or submit fraudulent materials. Violations can result in disqualification.
 - **Confidentiality:** Submission materials must be treated as confidential by judges and must not be copied, retained, or shared. Judges should abstain where a conflict of interest exists and disclose relevant affiliations.
@@ -179,8 +195,8 @@ Before building and submitting, complete the official [lablab.ai getting-started
 - Register for the event on the [lablab.ai event page](https://lablab.ai/ai-hackathons) and complete your [participant profile](https://lablab.ai/profile).
 - Open the specific event page and create or join a team. Teams may include no more than six participants; individual participation is also allowed.
 - Connect with the lablab.ai Discord server. Use `#ineedhelp` and tag `@Mentor` for mentor assistance, `#faq` for general questions, and the active-hackathon or looking-for-a-team channels for collaboration.
-- Use the team voice channels and their text chat for coordination. Team leaders can invite members through the dashboard’s teammate or invitation controls.
-- Watch the hackathon kickoff on [lablab.ai’s Twitch channel](https://www.twitch.tv/lablabai) and check Discord for the recording afterward.
+- Use the team voice channels and their text chat for coordination. Team leaders can invite members through the dashboard's teammate or invitation controls.
+- Watch the hackathon kickoff on [lablab.ai's Twitch channel](https://www.twitch.tv/lablabai) and check Discord for the recording afterward.
 - Submit the project from the team dashboard before the event deadline, including the title, descriptions, tracks, technologies, media, repository, demo URL, and scaling notes listed above.
 
 ## License
