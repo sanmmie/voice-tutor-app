@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
     return apiResponse(request, '/api/gist', requestId, 401, startedAt, { error: 'Unauthorized' });
   }
 
-  const rate = await enforceRateLimit(request, 'gist', 5, userId);
+  // Increased from 5/min to 15/min with 5-minute window for burst handling
+  const rate = await enforceRateLimit(request, 'gist', 15, userId);
   if (!rate.success) {
     return apiResponse(request, '/api/gist', requestId, 429, startedAt, { error: 'Too many requests' }, {
       headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },

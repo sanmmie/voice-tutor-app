@@ -3,6 +3,41 @@ import { executeTool } from '@/lib/tools';
 import { apiResponse, enforceRateLimit, getAuthenticatedUserId, getClientIp, getRequestId, isSameOrigin } from '@/lib/security';
 
 const MAX_BODY_BYTES = 128 * 1024; // 128KB for tool calls
+const MAX_TOOL_RETRIES = 2;
+const TOOL_RETRY_DELAY_MS = 500;
+
+async function executeToolWithRetry(name: string, args: Record<string, unknown>, retries = MAX_TOOL_RETRIES): Promise<unknown> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await executeTool(name, args);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      
+      // Don't retry on validation errors or rate limits
+      const message = lastError.message.toLowerCase();
+      if (message.includes('missing') || 
+          message.includes('invalid') || 
+          message.includes('rate limit') ||
+          message.includes('too many') ||
+          message.includes('unauthorized') ||
+          message.includes('forbidden')) {
+        throw lastError;
+      }
+      
+      // If this was the last attempt, throw
+      if (attempt === retries) {
+        throw lastError;
+      }
+      
+      // Wait before retry with exponential backoff
+      await new Promise(resolve => setTimeout(resolve, TOOL_RETRY_DELAY_MS * (attempt + 1)));
+    }
+  }
+  
+  throw lastError;
+}
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
@@ -48,9 +83,9 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await Promise.race([
-      executeTool(name, args ?? {}),
+      executeToolWithRetry(name, args ?? {}),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Tool execution timed out')), 5000);
+        setTimeout(() => reject(new Error('Tool execution timed out')), 15000);
       }),
     ]);
     return apiResponse(request, '/api/tool', requestId, 200, startedAt, { result });

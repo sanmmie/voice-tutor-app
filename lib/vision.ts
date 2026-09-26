@@ -7,6 +7,10 @@ const VISION_MODEL = process.env.VISION_MODEL || 'gpt-4o';
 const VISION_API_URL = process.env.VISION_API_URL || 'https://api.openai.com/v1/chat/completions';
 const VISION_API_KEY = process.env.VISION_API_KEY;
 
+// Retry configuration
+const MAX_VISION_RETRIES = 2;
+const VISION_RETRY_DELAY_MS = 1000;
+
 const SYSTEM_PROMPT = `You are a document analysis assistant for a voice-based coding and math tutor. 
 Extract and describe the content of the uploaded document clearly and completely.
 
@@ -22,6 +26,39 @@ For PDFs:
 - Note page numbers for reference
 
 Return a clear, well-structured description that the tutor can reference by voice.`;
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = MAX_VISION_RETRIES
+): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      
+      // Don't retry on client errors (4xx) except 429
+      if (!response.ok && response.status >= 400 && response.status < 500 && response.status !== 429) {
+        return response;
+      }
+      
+      return response;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      
+      // If this was the last attempt, throw
+      if (attempt === retries) {
+        throw lastError;
+      }
+      
+      // Wait before retry with exponential backoff
+      await new Promise(resolve => setTimeout(resolve, VISION_RETRY_DELAY_MS * (attempt + 1)));
+    }
+  }
+  
+  throw lastError;
+}
 
 export async function extractDocumentContent(
   base64Data: string,
@@ -58,7 +95,7 @@ export async function extractDocumentContent(
     },
   ];
 
-  const response = await fetch(VISION_API_URL, {
+  const response = await fetchWithRetry(VISION_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -70,7 +107,7 @@ export async function extractDocumentContent(
       max_tokens: 4000,
       temperature: 0.1,
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(20000),
   });
 
   if (!response.ok) {
@@ -120,7 +157,7 @@ export async function extractPdfContent(
     },
   ];
 
-  const response = await fetch(VISION_API_URL, {
+  const response = await fetchWithRetry(VISION_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -132,7 +169,7 @@ export async function extractPdfContent(
       max_tokens: 8000,
       temperature: 0.1,
     }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(40000),
   });
 
   if (!response.ok) {

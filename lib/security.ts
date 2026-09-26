@@ -48,7 +48,7 @@ export async function enforceRateLimit(
   if (!limiter) {
     limiter = new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(limit, '1 m'),
+      limiter: Ratelimit.slidingWindow(limit, '5 m'),
       analytics: true,
       prefix: `voice-tutor:${namespace}`,
     });

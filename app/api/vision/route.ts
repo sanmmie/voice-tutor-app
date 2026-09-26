@@ -22,8 +22,9 @@ export async function POST(request: NextRequest) {
   }
 
   // Use a guest identifier for rate limiting if no userId
+  // Increased from 10/min to 20/min with 5-minute window for burst handling
   const rateLimitIdentifier = userId || getClientIp(request);
-  const rate = await enforceRateLimit(request, 'vision', 10, rateLimitIdentifier);
+  const rate = await enforceRateLimit(request, 'vision', 20, rateLimitIdentifier);
   if (!rate.success) {
     return apiResponse(request, '/api/vision', requestId, 429, startedAt, { error: 'Too many requests' }, {
       headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },
