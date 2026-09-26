@@ -9,13 +9,13 @@ module.exports = {
     extend: {
       colors: {
         terminal: {
-          bg: '#0a0a0f',
-          surface: '#14141e',
-          border: '#2a2a3a',
-          text: '#e0e0e0',
-          accent: '#6ee7b7',
-          accentDim: '#34d399',
-          muted: '#6b7280',
+          bg: 'var(--bg-primary)',
+          surface: 'var(--bg-surface)',
+          border: 'var(--border)',
+          text: 'var(--text-primary)',
+          accent: 'var(--accent)',
+          accentDim: 'var(--accent-dim)',
+          muted: 'var(--text-muted)',
         },
         delta: {
           blue: { 50:'#eff6ff', 100:'#dbeafe', 200:'#bfdbfe', 300:'#93c5fd', 400:'#60a5fa', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 800:'#1e40af', 900:'#0b1230', 950:'#020617' },
