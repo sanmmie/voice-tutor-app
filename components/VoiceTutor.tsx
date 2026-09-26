@@ -14,6 +14,7 @@ import { PDFViewer } from './PDFViewer';
 import { LandingPage } from './LandingPage';
 import { TextInput } from './TextInput';
 import { DocumentUpload } from './DocumentUpload';
+import { ExportPanel } from './ExportPanel';
 import { useTheme } from '@/components/ThemeProvider';
 
 // Theme toggle icons - defined at module level to avoid re-creation on render
@@ -314,6 +315,8 @@ export function VoiceTutor() {
           onOpenPdfViewer={openPdfViewer}
           isGuest={false}
           isOpen={sidebarOpen}
+          userTranscripts={state.userTranscripts}
+          agentTranscripts={state.agentTranscripts}
         />
       )}
 
@@ -433,6 +436,17 @@ export function VoiceTutor() {
               isConnected={isConnected}
               isRecording={isRecording}
               placeholder="Type a message to the tutor..."
+            />
+          </div>
+
+          {/* Export Panel - for both guest and authenticated users */}
+          <div className="w-full max-w-3xl mx-auto px-4">
+            <ExportPanel
+              userTranscripts={state.userTranscripts}
+              agentTranscripts={state.agentTranscripts}
+              learningLevel={learningLevel}
+              learningPath={learningPath}
+              isGuest={isGuest}
             />
           </div>
 

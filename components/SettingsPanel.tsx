@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { TranscriptMessage } from '@/lib/types';
 
 interface SettingsPanelProps {
   learningLevel: 'entry' | 'basic' | 'intermediate' | 'advanced';
   learningPath: 'python' | 'web' | 'algorithms' | 'math' | 'general';
   onLevelChange: (level: 'entry' | 'basic' | 'intermediate' | 'advanced') => void;
   onPathChange: (path: 'python' | 'web' | 'algorithms' | 'math' | 'general') => void;
+  userTranscripts?: TranscriptMessage[];
+  agentTranscripts?: TranscriptMessage[];
 }
 
 const LEVELS = [
@@ -69,6 +72,8 @@ export function SettingsPanel({
   learningPath,
   onLevelChange,
   onPathChange,
+  userTranscripts,
+  agentTranscripts,
 }: SettingsPanelProps) {
   const [githubToken, setGithubToken] = useState('');
   const [githubTokenSaved, setGithubTokenSaved] = useState(false);
@@ -130,18 +135,29 @@ export function SettingsPanel({
     }
   };
 
-  const generateSessionSummary = () => {
-    // This would ideally get the actual transcript from context
-    // For now, return a placeholder
+  const generateSessionSummary = useCallback(() => {
+    const userMessages = userTranscripts?.filter(t => t.isFinal).map(t => `**You:** ${t.text}`).join('\n\n') || '*No user messages*';
+    const agentMessages = agentTranscripts?.filter(t => t.isFinal).map(t => `**Tutor:** ${t.text}`).join('\n\n') || '*No tutor responses*';
+    
+    // Interleave messages by timestamp
+    const allMessages = [
+      ...(userTranscripts || []).filter(t => t.isFinal).map(t => ({ role: 'user' as const, text: t.text, timestamp: t.timestamp })),
+      ...(agentTranscripts || []).filter(t => t.isFinal).map(t => ({ role: 'agent' as const, text: t.text, timestamp: t.timestamp })),
+    ].sort((a, b) => a.timestamp - b.timestamp);
+
+    const conversation = allMessages.map(m => `**${m.role === 'user' ? 'You' : 'Tutor'}:** ${m.text}`).join('\n\n') || '*No conversation yet*';
+
     return `# Syntax Session Summary
 
 **Date:** ${new Date().toLocaleString()}
 **Level:** ${learningLevel.charAt(0).toUpperCase() + learningLevel.slice(1)}
 **Path:** ${learningPath.charAt(0).toUpperCase() + learningPath.slice(1)}
 
-*Session transcript would be included here.*
+## Conversation
+
+${conversation}
 `;
-  };
+  }, [userTranscripts, agentTranscripts, learningLevel, learningPath]);
 
   const handleCopyGistUrl = () => {
     if (exportStatus?.message.includes('gist.github.com')) {

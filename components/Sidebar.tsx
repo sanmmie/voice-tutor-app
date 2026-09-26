@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { DocumentUpload } from './DocumentUpload';
 import { SettingsPanel } from './SettingsPanel';
+import { TranscriptMessage } from '@/lib/types';
 
 interface ChatItem {
   id: string;
@@ -28,6 +29,8 @@ interface SidebarProps {
   onOpenPdfViewer?: (src: string, fileName: string) => void;
   isGuest?: boolean;
   isOpen: boolean;
+  userTranscripts?: TranscriptMessage[];
+  agentTranscripts?: TranscriptMessage[];
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -107,6 +110,8 @@ export function Sidebar({
   onOpenPdfViewer,
   isGuest = false,
   isOpen,
+  userTranscripts,
+  agentTranscripts,
 }: SidebarProps) {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -316,6 +321,8 @@ export function Sidebar({
                 learningPath={learningPath}
                 onLevelChange={onLevelChange}
                 onPathChange={onPathChange}
+                userTranscripts={userTranscripts}
+                agentTranscripts={agentTranscripts}
               />
             )}
           </div>
