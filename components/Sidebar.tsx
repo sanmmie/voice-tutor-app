@@ -27,6 +27,7 @@ interface SidebarProps {
   onDocumentReady?: (name: string, type: 'image' | 'pdf') => void;
   onOpenPdfViewer?: (src: string, fileName: string) => void;
   isGuest?: boolean;
+  isOpen: boolean;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -74,7 +75,7 @@ function ClockIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
 function SettingsIcon({ className = 'h-5 w-5' }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   );
@@ -90,6 +91,8 @@ function SkeletonItem() {
   );
 }
 
+const SIDEBAR_WIDTH = '20rem'; // 320px
+
 export function Sidebar({
   userId,
   currentChatId,
@@ -103,6 +106,7 @@ export function Sidebar({
   onDocumentReady,
   onOpenPdfViewer,
   isGuest = false,
+  isOpen,
 }: SidebarProps) {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,10 +130,11 @@ export function Sidebar({
   }, []);
 
   useEffect(() => {
-    // Standard data-fetching on mount pattern; fetchChats updates state internally
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchChats();
-  }, [fetchChats]);
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchChats();
+    }
+  }, [isOpen, fetchChats]);
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
@@ -158,144 +163,164 @@ export function Sidebar({
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
-    <aside className="fixed left-0 top-0 h-full w-full max-w-md bg-terminal-surface border-r border-terminal-border z-50 flex flex-col">
-      <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-terminal-border">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/deltaos-core.svg"
-              alt="Syntax"
-              width={28}
-              height={28}
-              className="delta-glow"
-            />
-            <h2 className="font-mono text-lg text-terminal-accent">Syntax</h2>
+    <>
+      {/* Mobile overlay */}
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      
+      {/* Sidebar panel */}
+      <aside
+        className={`fixed left-0 top-0 h-full w-[20rem] max-w-[20rem] bg-terminal-surface border-r border-terminal-border z-50 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0`}
+        style={{
+          transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
+        }}
+        role="dialog"
+        aria-label="Sidebar navigation"
+        aria-hidden={!isOpen}
+      >
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-terminal-border">
+            <div className="flex items-center gap-2">
+              <Image
+                src="/deltaos-core.svg"
+                alt="Syntax"
+                width={28}
+                height={28}
+                className="delta-glow"
+              />
+              <h2 className="font-mono text-lg text-terminal-accent">Syntax</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 text-terminal-muted hover:text-terminal-accent transition-colors lg:hidden"
+              aria-label="Close sidebar"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 text-terminal-muted hover:text-terminal-accent transition-colors lg:hidden"
-            aria-label="Close sidebar"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
 
-        {/* New Chat Button */}
-        <div className="p-3 border-b border-terminal-border">
-          <button
-            type="button"
-            onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-mono text-terminal-text bg-terminal-bg rounded-lg border border-terminal-border hover:border-terminal-accent hover:text-terminal-accent transition-colors"
-          >
-            <PlusIcon />
-            <span>New session</span>
-          </button>
-        </div>
+          {/* New Chat Button */}
+          <div className="p-3 border-b border-terminal-border">
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-mono text-terminal-text bg-terminal-bg rounded-lg border border-terminal-border hover:border-terminal-accent hover:text-terminal-accent transition-colors"
+            >
+              <PlusIcon />
+              <span>New session</span>
+            </button>
+          </div>
 
-        {/* Chat History */}
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="p-3 space-y-2">
-              {[1, 2, 3, 4, 5].map((i) => <SkeletonItem key={i} />)}
-            </div>
-          ) : error ? (
-            <div className="p-4 text-center text-sm text-red-400">{error}</div>
-          ) : chats.length === 0 ? (
-            <div className="p-4 text-center text-sm text-terminal-muted">
-              No sessions yet. Start a new one!
-            </div>
-          ) : (
-            <ul className="divide-y divide-terminal-border" role="list">
-              {chats.map((chat) => {
-                const firstUserMessage = chat.messages.find((m) => m.role === 'user');
-                const preview = firstUserMessage ? truncate(firstUserMessage.text, 40) : 'No messages';
-                const isCurrent = chat.id === currentChatId;
+          {/* Chat History */}
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="p-3 space-y-2">
+                {[1, 2, 3, 4, 5].map((i) => <SkeletonItem key={i} />)}
+              </div>
+            ) : error ? (
+              <div className="p-4 text-center text-sm text-red-400">{error}</div>
+            ) : chats.length === 0 ? (
+              <div className="p-4 text-center text-sm text-terminal-muted">
+                No sessions yet. Start a new one!
+              </div>
+            ) : (
+              <ul className="divide-y divide-terminal-border" role="list">
+                {chats.map((chat) => {
+                  const firstUserMessage = chat.messages.find((m) => m.role === 'user');
+                  const preview = firstUserMessage ? truncate(firstUserMessage.text, 40) : 'No messages';
+                  const isCurrent = chat.id === currentChatId;
 
-                return (
-                  <li key={chat.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectChat(chat.id)}
-                      className={`w-full px-3 py-3 text-left transition-colors ${
-                        isCurrent
-                          ? 'bg-terminal-accent/10 border-l-2 border-terminal-accent'
-                          : 'hover:bg-terminal-bg'
-                      }`}
-                      aria-current={isCurrent ? 'true' : 'false'}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-mono text-sm text-terminal-text truncate">
-                            {truncate(chat.title, 22)}
-                          </p>
-                          <p className="mt-1 text-xs text-terminal-muted truncate">{preview}</p>
-                          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-terminal-muted">
-                            <ClockIcon />
-                            <span>{formatRelativeTime(chat.updatedAt)}</span>
+                  return (
+                    <li key={chat.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectChat(chat.id)}
+                        className={`w-full px-3 py-3 text-left transition-colors ${
+                          isCurrent
+                            ? 'bg-terminal-accent/10 border-l-2 border-terminal-accent'
+                            : 'hover:bg-terminal-bg'
+                        }`}
+                        aria-current={isCurrent ? 'true' : 'false'}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-mono text-sm text-terminal-text truncate">
+                              {truncate(chat.title, 22)}
+                            </p>
+                            <p className="mt-1 text-xs text-terminal-muted truncate">{preview}</p>
+                            <div className="mt-1.5 flex items-center gap-1.5 text-xs text-terminal-muted">
+                              <ClockIcon />
+                              <span>{formatRelativeTime(chat.updatedAt)}</span>
+                            </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(chat.id);
+                            }}
+                            disabled={deletingId === chat.id}
+                            className="flex-shrink-0 p-1 text-terminal-muted hover:text-red-400 transition-colors disabled:opacity-50"
+                            aria-label={`Delete ${chat.title}`}
+                          >
+                            {deletingId === chat.id ? (
+                              <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                                <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                            ) : (
+                              <TrashIcon />
+                            )}
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(chat.id);
-                          }}
-                          disabled={deletingId === chat.id}
-                          className="flex-shrink-0 p-1 text-terminal-muted hover:text-red-400 transition-colors disabled:opacity-50"
-                          aria-label={`Delete ${chat.title}`}
-                        >
-                          {deletingId === chat.id ? (
-                            <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
-                              <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                          ) : (
-                            <TrashIcon />
-                          )}
-                        </button>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Document Upload & Settings at bottom */}
-        <div className="border-t border-terminal-border p-3 space-y-3">
-          <div className="card p-3">
-            <DocumentUpload 
-              onDocumentReady={onDocumentReady} 
-              onOpenPdfViewer={onOpenPdfViewer}
-              isGuest={isGuest}
-            />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-          
-          <button
-            type="button"
-            onClick={() => setShowSettings(!showSettings)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-mono text-terminal-muted hover:text-terminal-accent transition-colors"
-          >
-            <SettingsIcon />
-            <span>{showSettings ? 'Hide settings' : 'Settings'}</span>
-          </button>
 
-          {showSettings && (
-            <SettingsPanel
-              learningLevel={learningLevel}
-              learningPath={learningPath}
-              onLevelChange={onLevelChange}
-              onPathChange={onPathChange}
-            />
-          )}
+          {/* Document Upload & Settings at bottom */}
+          <div className="border-t border-terminal-border p-3 space-y-3">
+            <div className="card p-3">
+              <DocumentUpload 
+                onDocumentReady={onDocumentReady} 
+                onOpenPdfViewer={onOpenPdfViewer}
+                isGuest={isGuest}
+              />
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => setShowSettings(!showSettings)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-mono text-terminal-muted hover:text-terminal-accent transition-colors"
+            >
+              <SettingsIcon />
+              <span>{showSettings ? 'Hide settings' : 'Settings'}</span>
+            </button>
+
+            {showSettings && (
+              <SettingsPanel
+                learningLevel={learningLevel}
+                learningPath={learningPath}
+                onLevelChange={onLevelChange}
+                onPathChange={onPathChange}
+              />
+            )}
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

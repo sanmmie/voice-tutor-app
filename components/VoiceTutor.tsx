@@ -314,14 +314,12 @@ export function VoiceTutor() {
           onDocumentReady={handleDocumentReady}
           onOpenPdfViewer={openPdfViewer}
           isGuest={isGuest}
+          isOpen={sidebarOpen}
         />
       )}
 
       {/* Main Content */}
-      <main
-        className={`flex-1 flex flex-col min-w-0 ${!isGuest ? 'lg:ml-[320px]' : ''}`}
-        style={{ marginLeft: isGuest ? 0 : sidebarOpen ? '320px' : 0 }}
-      >
+      <main className="flex-1 flex flex-col min-w-0 lg:pl-[20rem]">
         {/* Mobile sidebar toggle */}
         <div className="lg:hidden p-3 border-b border-terminal-border bg-terminal-surface">
           <button
@@ -357,19 +355,6 @@ export function VoiceTutor() {
               </span>
             )}
             <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
-            {!isGuest && (
-              <button
-                type="button"
-                onClick={handleNewChat}
-                className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
-                aria-label="New conversation"
-                title="New conversation"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-            )}
             <button
               type="button"
               onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
