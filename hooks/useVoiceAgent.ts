@@ -687,11 +687,38 @@ ws.onopen = () => {
     return () => { disconnect(); };
   }, [disconnect]);
 
-  const sendText = useCallback((text: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'input.text', text }));
+  const sendText = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    
+    try {
+      const res = await fetch('/api/chat/text', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          message: text,
+          history: state.userTranscripts
+            .map(t => ({ role: 'user', content: t.text }))
+            .concat(state.agentTranscripts.map(t => ({ role: 'assistant', content: t.text })))
+            .sort((a, b) => 0) // Keep order, just take last 10
+            .slice(-10),
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to send message');
+      }
+
+      const data = await res.json();
+      // The response will be spoken by the agent via the voice agent
+      // We don't need to add it to transcripts here - the voice agent will handle it
+    } catch (err) {
+      console.error('Failed to send text message:', err);
     }
-  }, []);
+  }, [state.userTranscripts, state.agentTranscripts]);
 
   return {
     state,

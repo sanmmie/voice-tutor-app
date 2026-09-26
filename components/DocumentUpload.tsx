@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import Image from 'next/image';
 import { setDocumentContent, clearDocumentContent } from '@/lib/tools';
 
 interface DocumentUploadProps {
@@ -205,10 +206,13 @@ export function DocumentUpload({ onDocumentReady, onOpenPdfViewer, isGuest = fal
 
           {!isPdf && preview && (
             <div className="mt-3 relative aspect-video rounded-lg overflow-hidden bg-terminal-bg">
-              <img
+              {/* eslint-disable-next-line @next/next/no-img-element -- Using Next.js Image with blob URL */}
+              <Image
                 src={preview}
                 alt="Preview"
-                className="w-full h-full object-cover"
+                fill
+                className="object-cover"
+                sizes="100%"
               />
             </div>
           )}
