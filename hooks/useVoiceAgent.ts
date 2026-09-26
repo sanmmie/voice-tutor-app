@@ -9,6 +9,7 @@ const DEBUG = false; // flip to true to log mic-capture heartbeats + WS events
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 50;
 const CHUNK_SAMPLES = (SAMPLE_RATE * CHUNK_MS) / 1000; // 1200
+const SCRIPT_PROCESSOR_BUFFER_SIZE = 4096; // Increased from 2048 for lower CPU overhead
 
 interface UseVoiceAgentOptions {
   onTranscript?: (msg: TranscriptMessage) => void;
@@ -47,10 +48,26 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const endTimerRef = useRef<number | null>(null);
   const endingRef = useRef(false);
   const startingRef = useRef(false);
+  const lastTokenRequestRef = useRef<number>(0);
+  const clientIdRef = useRef<string | null>(null);
   const connectRef = useRef<(token: string, resume?: boolean) => Promise<void>>();
 
   const log = useCallback((...args: unknown[]) => {
     if (DEBUG) console.log('[VoiceTutor]', ...args);
+  }, []);
+
+  const getClientId = useCallback(() => {
+    if (clientIdRef.current) return clientIdRef.current;
+    if (typeof window !== 'undefined') {
+      let id = sessionStorage.getItem('syntax_client_id');
+      if (!id) {
+        id = crypto.randomUUID();
+        sessionStorage.setItem('syntax_client_id', id);
+      }
+      clientIdRef.current = id;
+      return id;
+    }
+    return 'server-side';
   }, []);
 
   const setStatus = useCallback((status: VoiceAgentState['status']) => {
@@ -501,10 +518,12 @@ ws.onopen = () => {
     if (!ctx) return;
 
     const source = ctx.createMediaStreamSource(stream);
-    const processor = ctx.createScriptProcessor(2048, 1, 1);
+    const processor = ctx.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER_SIZE, 1, 1);
     processorRef.current = processor;
 
-    let pcmBuffer = new Int16Array(0);
+    // Pre-allocate buffer to avoid GC pressure from repeated allocations
+    let pcmBuffer = new Int16Array(CHUNK_SAMPLES * 4); // 4 chunks worth of space
+    let pcmBufferLength = 0;
     let captureCount = 0;
 
     processor.onaudioprocess = (e) => {
@@ -517,14 +536,21 @@ ws.onopen = () => {
       const resampled = resampleFloat32(inputData, ctx.sampleRate, SAMPLE_RATE);
       const int16 = float32ToInt16(resampled);
 
-      const newBuffer = new Int16Array(pcmBuffer.length + int16.length);
-      newBuffer.set(pcmBuffer);
-      newBuffer.set(int16, pcmBuffer.length);
-      pcmBuffer = newBuffer;
+      // Efficient buffer append using pre-allocated space
+      if (pcmBufferLength + int16.length > pcmBuffer.length) {
+        // Resize if needed (should be rare with 4-chunk buffer)
+        const newBuffer = new Int16Array(pcmBuffer.length * 2);
+        newBuffer.set(pcmBuffer.subarray(0, pcmBufferLength));
+        pcmBuffer = newBuffer;
+      }
+      pcmBuffer.set(int16, pcmBufferLength);
+      pcmBufferLength += int16.length;
 
-      while (pcmBuffer.length >= CHUNK_SAMPLES) {
-        const chunk = pcmBuffer.slice(0, CHUNK_SAMPLES);
-        pcmBuffer = pcmBuffer.slice(CHUNK_SAMPLES);
+      while (pcmBufferLength >= CHUNK_SAMPLES) {
+        const chunk = pcmBuffer.subarray(0, CHUNK_SAMPLES);
+        // Shift remaining data to front
+        pcmBuffer.copyWithin(0, CHUNK_SAMPLES, pcmBufferLength);
+        pcmBufferLength -= CHUNK_SAMPLES;
         const base64 = int16ToBase64(chunk);
 
         if (wsRef.current?.readyState === WebSocket.OPEN && !endingRef.current) {
@@ -613,6 +639,15 @@ ws.onopen = () => {
     if (startingRef.current) {
       return;
     }
+
+    // Client-side rate limiting: prevent token requests more often than once per 2 seconds
+    const now = Date.now();
+    if (now - lastTokenRequestRef.current < 2000) {
+      startingRef.current = false;
+      return;
+    }
+    lastTokenRequestRef.current = now;
+
     startingRef.current = true;
     endingRef.current = false;
     try {
@@ -626,8 +661,12 @@ ws.onopen = () => {
       // token so the gesture survives.
       await acquireMicStream();
 
-      const tokenUrl = options.guest ? '/api/token?guest=true' : '/api/token';
-      const res = await fetch(tokenUrl);
+      const tokenUrl = options.guest 
+        ? `/api/token?guest=true&clientId=${encodeURIComponent(getClientId())}`
+        : '/api/token';
+      const res = await fetch(tokenUrl, {
+        headers: options.guest ? { 'x-client-id': getClientId() } : {},
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to get token');
       await ensureAudioContext();
@@ -642,7 +681,7 @@ ws.onopen = () => {
     } finally {
       startingRef.current = false;
     }
-  }, [acquireMicStream, connect, ensureAudioContext, startMicrophone, setStatus]);
+  }, [acquireMicStream, connect, ensureAudioContext, startMicrophone, setStatus, getClientId]);
 
   useEffect(() => {
     return () => { disconnect(); };

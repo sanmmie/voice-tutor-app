@@ -19,10 +19,13 @@ export async function GET(request: NextRequest) {
       return apiResponse(request, '/api/token', requestId, 403, startedAt, { error: 'Forbidden' });
     }
 
-    // Guest mode: higher rate limit (30/min) since unauthenticated users share IPs
-    // Authenticated users: 10/min
-    const rateLimit = isGuest ? 30 : 10;
-    const identifier = isGuest ? getClientIp(request) : await getAuthenticatedUserId(request);
+    // Guest mode: much higher rate limit (60/5min) since unauthenticated users share IPs
+    // Authenticated users: 10/5min
+    // Use 5-minute window for better burst handling
+    const rateLimit = isGuest ? 60 : 10;
+    const identifier = isGuest 
+      ? request.headers.get('x-client-id') || getClientIp(request) 
+      : await getAuthenticatedUserId(request);
     
     const rate = await enforceRateLimit(request, 'token', rateLimit, identifier || getClientIp(request));
     if (!rate.success) {

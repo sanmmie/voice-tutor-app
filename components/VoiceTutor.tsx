@@ -243,14 +243,6 @@ export function VoiceTutor() {
     await startSession({ guest: true });
   }, [startSession]);
 
-  // Restart session when learning level/path changes (only if currently connected)
-  useEffect(() => {
-    if (isConnected || isRecording) {
-      disconnect();
-      startSession(isGuest ? { guest: true } : undefined);
-    }
-  }, [learningLevel, learningPath, isConnected, isRecording, disconnect, startSession, isGuest]);
-
   const handleStart = () => {
     startSession(isGuest ? { guest: true } : undefined);
   };
@@ -267,7 +259,6 @@ export function VoiceTutor() {
     if (!isNaN(parsedId)) {
       setUserId(parsedId);
     }
-    // Session will auto-restart with authenticated user via useEffect
   };
 
   const handleSignOut = async () => {
