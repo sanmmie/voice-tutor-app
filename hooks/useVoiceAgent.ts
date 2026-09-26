@@ -687,7 +687,7 @@ ws.onopen = () => {
     return () => { disconnect(); };
   }, [disconnect]);
 
-  const sendTextInput = useCallback((text: string) => {
+  const sendText = useCallback((text: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'input.text', text }));
     }
@@ -700,6 +700,6 @@ ws.onopen = () => {
     setTranscripts,
     isRecording: state.status === 'recording',
     isConnected: state.status === 'connected' || state.status === 'recording',
-    sendTextInput,
+    sendText,
   };
 }

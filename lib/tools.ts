@@ -78,6 +78,21 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    type: 'function',
+    name: 'receive_text_message',
+    description: 'Receive a text message from the user (typed via keyboard). Use this when the user sends a text message instead of speaking. The message content will be provided as a parameter.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'The text message sent by the user via keyboard input',
+        },
+      },
+      required: ['message'],
+    },
+  },
 ];
 
 // --- Tool Handlers (executed server-side) ---
@@ -197,6 +212,20 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         type: doc.type,
         name: doc.name,
         content: doc.content,
+      };
+    }
+
+    case 'receive_text_message': {
+      const { message } = args;
+      if (!message || typeof message !== 'string') {
+        throw new Error('Missing message');
+      }
+      // This tool acknowledges receipt of a text message from the user
+      // The agent should respond to this message naturally
+      return {
+        received: true,
+        message,
+        timestamp: Date.now(),
       };
     }
 

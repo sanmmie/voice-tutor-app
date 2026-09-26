@@ -12,6 +12,8 @@ import { Logo } from './Logo';
 import { Sidebar } from './Sidebar';
 import { PDFViewer } from './PDFViewer';
 import { LandingPage } from './LandingPage';
+import { TextInput } from './TextInput';
+import { DocumentUpload } from './DocumentUpload';
 import { useTheme } from '@/components/ThemeProvider';
 
 // Theme toggle icons - defined at module level to avoid re-creation on render
@@ -38,7 +40,6 @@ export function VoiceTutor() {
   const [userId, setUserId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSignInModal, setShowSignInModal] = useState(false);
-  const [initialPrompt, setInitialPrompt] = useState<string>('');
   const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('syntax_learning_level') as 'entry' | 'basic' | 'intermediate' | 'advanced') || 'basic';
@@ -53,7 +54,7 @@ export function VoiceTutor() {
   });
   const [pdfViewer, setPdfViewer] = useState<{ src: string; fileName: string } | null>(null);
 
-  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording, sendTextInput } = useVoiceAgent({
+  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording, sendText } = useVoiceAgent({
     learningLevel,
     learningPath,
     isGuest,
@@ -97,14 +98,6 @@ export function VoiceTutor() {
       controller.abort();
     };
   }, [isGuest]);
-
-  // Send initial prompt when session connects
-  useEffect(() => {
-    if (initialPrompt && (isConnected || isRecording)) {
-      sendTextInput?.(initialPrompt);
-      setInitialPrompt(''); // eslint-disable-line react-hooks/set-state-in-effect
-    }
-  }, [initialPrompt, isConnected, isRecording, sendTextInput]);
 
   const createNewChat = useCallback(async () => {
     if (!userId) return;
@@ -259,9 +252,8 @@ export function VoiceTutor() {
     setPdfViewer({ src, fileName });
   }, []);
 
-  const startGuestSession = useCallback(async (prompt?: string) => {
+  const startGuestSession = useCallback(async (_prompt?: string) => {
     setIsGuest(true);
-    if (prompt) setInitialPrompt(prompt);
     await startSession({ guest: true });
   }, [startSession]);
 
@@ -407,6 +399,17 @@ export function VoiceTutor() {
             </div>
           )}
 
+          {/* Document Upload for guests (and authenticated users without sidebar on mobile) */}
+          {(isGuest || !user) && (
+            <div className="mx-3 mb-4">
+              <DocumentUpload
+                onDocumentReady={handleDocumentReady}
+                onOpenPdfViewer={openPdfViewer}
+                isGuest={isGuest}
+              />
+            </div>
+          )}
+
           {/* Visualizer */}
           <div className="flex justify-center">
             <VoiceVisualizer isActive={isRecording} />
@@ -420,6 +423,16 @@ export function VoiceTutor() {
               onStart={handleStart}
               onStop={handleStop}
               status={state.status}
+            />
+          </div>
+
+          {/* Text Input - for keyboard input */}
+          <div className="w-full max-w-3xl mx-auto px-4">
+            <TextInput
+              onSendText={sendText}
+              isConnected={isConnected}
+              isRecording={isRecording}
+              placeholder="Type a message to the tutor..."
             />
           </div>
 
