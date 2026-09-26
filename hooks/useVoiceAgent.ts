@@ -46,6 +46,7 @@ export function useVoiceAgent(options: UseVoiceAgentOptions = {}) {
   const reconnectTimerRef = useRef<number | null>(null);
   const endTimerRef = useRef<number | null>(null);
   const endingRef = useRef(false);
+  const startingRef = useRef(false);
   const connectRef = useRef<(token: string, resume?: boolean) => Promise<void>>();
 
   const log = useCallback((...args: unknown[]) => {
@@ -600,6 +601,7 @@ ws.onopen = () => {
     sessionIdRef.current = null;
     setStatus('idle');
     setState((prev) => ({ ...prev, sessionId: null }));
+    startingRef.current = false;
   }, [setStatus, stopAllPlayback]);
 
   // --- Initiate session ---
@@ -607,6 +609,11 @@ ws.onopen = () => {
   // unauthenticated judges can reach the tutor without registering. Guest
   // sessions are rate-limited and get a shorter token TTL.
   const startSession = useCallback(async (options: { guest?: boolean } = {}) => {
+    // Prevent multiple concurrent start attempts
+    if (startingRef.current) {
+      return;
+    }
+    startingRef.current = true;
     endingRef.current = false;
     try {
       // Acquire the mic stream FIRST, while the user gesture that triggered
@@ -632,6 +639,8 @@ ws.onopen = () => {
         error: err instanceof Error ? err.message : 'Startup failed',
       }));
       setStatus('error');
+    } finally {
+      startingRef.current = false;
     }
   }, [acquireMicStream, connect, ensureAudioContext, startMicrophone, setStatus]);
 

@@ -3,6 +3,7 @@ import {
   apiResponse,
   enforceRateLimit,
   getAuthenticatedUserId,
+  getClientIp,
   getRequestId,
   isSameOrigin,
 } from '@/lib/security';
@@ -11,22 +12,25 @@ export async function GET(request: NextRequest) {
   const startedAt = Date.now();
   const requestId = getRequestId(request);
   try {
-    const rate = await enforceRateLimit(request, 'token', 10);
-    if (!rate.success) {
-      return apiResponse(request, '/api/token', requestId, 429, startedAt, { error: 'Too many requests' }, {
-        headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },
-      });
-    }
+    const url = new URL(request.url);
+    const isGuest = url.searchParams.get('guest') === 'true';
 
     if (!isSameOrigin(request)) {
       return apiResponse(request, '/api/token', requestId, 403, startedAt, { error: 'Forbidden' });
     }
 
-    // Guest mode: skip the session check entirely so unauthenticated judges can
-    // reach the tutor without registering. Still rate-limited and same-origin
-    // enforced. The token gets a shorter TTL so guest sessions expire faster.
-    const url = new URL(request.url);
-    const isGuest = url.searchParams.get('guest') === 'true';
+    // Guest mode: higher rate limit (30/min) since unauthenticated users share IPs
+    // Authenticated users: 10/min
+    const rateLimit = isGuest ? 30 : 10;
+    const identifier = isGuest ? getClientIp(request) : await getAuthenticatedUserId(request);
+    
+    const rate = await enforceRateLimit(request, 'token', rateLimit, identifier || getClientIp(request));
+    if (!rate.success) {
+      return apiResponse(request, '/api/token', requestId, 429, startedAt, { error: 'Too many requests. Please wait a moment.' }, {
+        headers: { 'Retry-After': String(Math.ceil((rate.reset - Date.now()) / 1000)) },
+      });
+    }
+
     if (!isGuest && !(await getAuthenticatedUserId(request))) {
       return apiResponse(request, '/api/token', requestId, 401, startedAt, { error: 'Not authenticated' });
     }
@@ -36,8 +40,6 @@ export async function GET(request: NextRequest) {
       return apiResponse(request, '/api/token', requestId, 500, startedAt, { error: 'Service is not configured' });
     }
 
-    // Guest sessions are capped shorter so a forgotten tab doesn't hold a
-    // voice slot for hours. Authenticated sessions keep the full 3h.
     const maxDuration = isGuest ? 3600 : 10800;
     const res = await fetch(
       `https://agents.assemblyai.com/v1/token?expires_in_seconds=300&max_session_duration_seconds=${maxDuration}`,
