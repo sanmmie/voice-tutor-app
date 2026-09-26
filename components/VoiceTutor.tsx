@@ -21,9 +21,20 @@ export function VoiceTutor() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>('basic');
-  const [learningPath, setLearningPath] = useState<'python' | 'web' | 'algorithms' | 'math' | 'general'>('general');
+  const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('syntax_learning_level') as 'entry' | 'basic' | 'intermediate' | 'advanced') || 'basic';
+    }
+    return 'basic';
+  });
+  const [learningPath, setLearningPath] = useState<'python' | 'web' | 'algorithms' | 'math' | 'general'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('syntax_learning_path') as 'python' | 'web' | 'algorithms' | 'math' | 'general') || 'general';
+    }
+    return 'general';
+  });
   const [pdfViewer, setPdfViewer] = useState<{ src: string; fileName: string } | null>(null);
+  const [shouldStartSession, setShouldStartSession] = useState(false);
 
   const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent({
     learningLevel,
@@ -33,7 +44,22 @@ export function VoiceTutor() {
 
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedChatRef = useRef(false);
-  const sessionRestartRef = useRef(false);
+
+  // Persist learning settings to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('syntax_learning_level', learningLevel);
+      localStorage.setItem('syntax_learning_path', learningPath);
+    }
+  }, [learningLevel, learningPath]);
+
+  // Auto-start session after authentication (for non-guest users)
+  useEffect(() => {
+    if (shouldStartSession && !authLoading && user && !isGuest) {
+      setShouldStartSession(false); // eslint-disable-line react-hooks/set-state-in-effect
+      startSession();
+    }
+  }, [shouldStartSession, authLoading, user, isGuest, startSession]);
 
   const startGuestSession = useCallback(async () => {
     setIsGuest(true);
@@ -210,12 +236,10 @@ export function VoiceTutor() {
 
   const handleLevelChange = useCallback((level: 'entry' | 'basic' | 'intermediate' | 'advanced') => {
     setLearningLevel(level);
-    sessionRestartRef.current = true;
   }, []);
 
   const handlePathChange = useCallback((path: 'python' | 'web' | 'algorithms' | 'math' | 'general') => {
     setLearningPath(path);
-    sessionRestartRef.current = true;
   }, []);
 
   const handleDocumentReady = useCallback((name: string, type: 'image' | 'pdf') => {
@@ -233,10 +257,9 @@ export function VoiceTutor() {
     window.location.reload();
   };
 
-  // Restart session when learning level/path changes
+  // Restart session when learning level/path changes (only if currently connected)
   useEffect(() => {
-    if (sessionRestartRef.current && (isConnected || isRecording)) {
-      sessionRestartRef.current = false;
+    if (isConnected || isRecording) {
       disconnect();
       startSession(isGuest ? { guest: true } : undefined);
     }
@@ -259,6 +282,8 @@ export function VoiceTutor() {
           setAuthError(false);
           setIsGuest(false);
           setUser(authenticatedUser);
+          // Trigger session start after auth
+          setShouldStartSession(true);
         }}
       />
     );
@@ -430,6 +455,7 @@ export function VoiceTutor() {
           fileName={pdfViewer.fileName}
           onClose={() => setPdfViewer(null)}
           onProcessComplete={() => setPdfViewer(null)}
+          isGuest={isGuest}
         />
       )}
     </div>

@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { extractPdfContent } from '@/lib/vision';
 import { setDocumentContent } from '@/lib/tools';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -12,6 +11,7 @@ interface PDFViewerProps {
   fileName: string;
   onClose: () => void;
   onProcessComplete?: () => void;
+  isGuest?: boolean;
 }
 
 function ChevronLeftIcon({ className = 'h-5 w-5' }: { className?: string }) {
@@ -62,7 +62,7 @@ function CheckIcon({ className = 'h-4 w-4' }: { className?: string }) {
   );
 }
 
-export function PDFViewer({ src, fileName, onClose, onProcessComplete }: PDFViewerProps) {
+export function PDFViewer({ src, fileName, onClose, onProcessComplete, isGuest = false }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
@@ -106,8 +106,34 @@ export function PDFViewer({ src, fileName, onClose, onProcessComplete }: PDFView
         return canvas.toDataURL('image/png').split(',')[1];
       }).filter(Boolean);
 
-      const result = await extractPdfContent(base64Pages, 'application/pdf', fileName);
-      setDocumentContent(result.text, 'pdf', fileName);
+      const response = await fetch('/api/vision', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(isGuest ? { 'x-guest-mode': 'true' } : {})
+        },
+        body: JSON.stringify({
+          pages: base64Pages,
+          mimeType: 'application/pdf',
+          fileName,
+        }),
+      });
+
+      let data;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(`Server error (${response.status}): ${text.slice(0, 200)}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to process PDF');
+      }
+
+      const { text, type } = data.result;
+      setDocumentContent(text, type, fileName);
       setProcessed(true);
       onProcessComplete?.();
     } catch (err) {

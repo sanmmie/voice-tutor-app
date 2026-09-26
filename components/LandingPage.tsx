@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Logo } from './Logo';
 import { AuthPanel } from './AuthPanel';
+import { SettingsPanel } from './SettingsPanel';
 
 interface LandingPageProps {
   isGuest: boolean;
@@ -35,8 +36,38 @@ function ArrowRightIcon({ className = 'h-5 w-5' }: { className?: string }) {
   );
 }
 
+function SettingsIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
 export function LandingPage({ isGuest, onGuestSession, onAuthenticated }: LandingPageProps) {
   const [showAuth, setShowAuth] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>('basic');
+  const [learningPath, setLearningPath] = useState<'python' | 'web' | 'algorithms' | 'math' | 'general'>('general');
+
+  // Load persisted settings on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedLevel = localStorage.getItem('syntax_learning_level') as 'entry' | 'basic' | 'intermediate' | 'advanced' | null;
+      const savedPath = localStorage.getItem('syntax_learning_path') as 'python' | 'web' | 'algorithms' | 'math' | 'general' | null;
+      if (savedLevel) setLearningLevel(savedLevel); // eslint-disable-line react-hooks/set-state-in-effect
+      if (savedPath) setLearningPath(savedPath); // eslint-disable-line react-hooks/set-state-in-effect
+    }
+  }, []);
+
+  // Persist settings when they change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('syntax_learning_level', learningLevel);
+      localStorage.setItem('syntax_learning_path', learningPath);
+    }
+  }, [learningLevel, learningPath]);
 
   const handleStartSession = () => {
     if (isGuest) {
@@ -46,13 +77,31 @@ export function LandingPage({ isGuest, onGuestSession, onAuthenticated }: Landin
     }
   };
 
+  const handleLevelChange = (level: 'entry' | 'basic' | 'intermediate' | 'advanced') => {
+    setLearningLevel(level);
+  };
+
+  const handlePathChange = (path: 'python' | 'web' | 'algorithms' | 'math' | 'general') => {
+    setLearningPath(path);
+  };
+
   return (
     <div className="flex h-full">
       {/* Sidebar - simplified for landing */}
       <aside className="hidden lg:flex lg:flex-col h-full w-72 bg-terminal-surface border-r border-terminal-border flex-shrink-0">
         <div className="flex flex-col h-full">
-          <div className="flex items-center justify-center p-4 border-b border-terminal-border">
-            <Logo size={28} />
+          <div className="flex items-center justify-between p-4 border-b border-terminal-border">
+            <div className="flex items-center gap-2">
+              <Logo size={28} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-2 text-terminal-muted hover:text-terminal-accent transition-colors rounded-lg hover:bg-terminal-bg"
+              aria-label={showSettings ? 'Hide settings' : 'Settings'}
+            >
+              <SettingsIcon />
+            </button>
           </div>
           <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             <button
@@ -139,6 +188,18 @@ export function LandingPage({ isGuest, onGuestSession, onAuthenticated }: Landin
                 desc="Choose your level (Entry to Advanced) and path (Python, Web, Algorithms, Math)"
               />
             </div>
+
+            {/* Settings Panel */}
+            {showSettings && (
+              <div className="animate-fade-in">
+                <SettingsPanel
+                  learningLevel={learningLevel}
+                  learningPath={learningPath}
+                  onLevelChange={handleLevelChange}
+                  onPathChange={handlePathChange}
+                />
+              </div>
+            )}
 
             {/* CTA */}
             <div className="text-center pt-4">
