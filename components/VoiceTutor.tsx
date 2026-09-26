@@ -15,12 +15,11 @@ import { LandingPage } from './LandingPage';
 
 export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showSignInModal, setShowSignInModal] = useState(false);
   const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('syntax_learning_level') as 'entry' | 'basic' | 'intermediate' | 'advanced') || 'basic';
@@ -34,7 +33,6 @@ export function VoiceTutor() {
     return 'general';
   });
   const [pdfViewer, setPdfViewer] = useState<{ src: string; fileName: string } | null>(null);
-  const [shouldStartSession, setShouldStartSession] = useState(false);
 
   const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent({
     learningLevel,
@@ -44,6 +42,7 @@ export function VoiceTutor() {
 
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedChatRef = useRef(false);
+  const authCheckedRef = useRef(false);
 
   // Persist learning settings to localStorage
   useEffect(() => {
@@ -53,19 +52,38 @@ export function VoiceTutor() {
     }
   }, [learningLevel, learningPath]);
 
-  // Auto-start session after authentication (for non-guest users)
+  // Check auth status in background (non-blocking)
   useEffect(() => {
-    if (shouldStartSession && !authLoading && user && !isGuest) {
-      setShouldStartSession(false); // eslint-disable-line react-hooks/set-state-in-effect
-      startSession();
-    }
-  }, [shouldStartSession, authLoading, user, isGuest, startSession]);
+    if (authCheckedRef.current || isGuest) return;
+    authCheckedRef.current = true;
 
-  const startGuestSession = useCallback(async () => {
-    setIsGuest(true);
-    setAuthError(false);
-    await startSession({ guest: true });
-  }, [startSession]);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
+
+    fetch('/api/auth/me', { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => {
+        const authenticatedUser = data?.user || null;
+        if (authenticatedUser) {
+          setUser(authenticatedUser);
+          const parsedId = parseInt(authenticatedUser.id, 10);
+          if (!isNaN(parsedId)) {
+            setUserId(parsedId);
+          }
+        }
+      })
+      .catch(() => {
+        // Silently fail - user stays as guest
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+      });
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [isGuest]);
 
   const createNewChat = useCallback(async () => {
     if (!userId) return;
@@ -84,37 +102,7 @@ export function VoiceTutor() {
     }
   }, [userId]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 10000);
-
-    fetch('/api/auth/me', { signal: controller.signal })
-      .then(async (response) => response.ok ? response.json() : null)
-      .then((data) => {
-        const authenticatedUser = data?.user || null;
-        setUser(authenticatedUser);
-        if (authenticatedUser?.id) {
-          const parsedId = parseInt(authenticatedUser.id, 10);
-          if (!isNaN(parsedId)) {
-            setUserId(parsedId);
-          }
-        }
-      })
-      .catch(() => {
-        setUser(null);
-        setAuthError(true);
-      })
-      .finally(() => {
-        window.clearTimeout(timeout);
-        setAuthLoading(false);
-      });
-
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, []);
-
+  // Initialize chat for authenticated users
   useEffect(() => {
     if (user && userId !== null && !hasInitializedChatRef.current) {
       hasInitializedChatRef.current = true;
@@ -243,19 +231,17 @@ export function VoiceTutor() {
   }, []);
 
   const handleDocumentReady = useCallback((name: string, type: 'image' | 'pdf') => {
-    if (type === 'pdf') {
-      // For PDFs, we'll open the viewer (handled by DocumentUpload via a different mechanism)
-      // This is a placeholder - the PDF viewer is opened from the upload component
-    }
+    // Handled by DocumentUpload/PDFViewer
   }, []);
 
   const openPdfViewer = useCallback((src: string, fileName: string) => {
     setPdfViewer({ src, fileName });
   }, []);
 
-  const retryAuth = () => {
-    window.location.reload();
-  };
+  const startGuestSession = useCallback(async () => {
+    setIsGuest(true);
+    await startSession({ guest: true });
+  }, [startSession]);
 
   // Restart session when learning level/path changes (only if currently connected)
   useEffect(() => {
@@ -265,30 +251,6 @@ export function VoiceTutor() {
     }
   }, [learningLevel, learningPath, isConnected, isRecording, disconnect, startSession, isGuest]);
 
-  if (authLoading) {
-    return (
-      <div className="font-mono text-terminal-muted" role="status">
-        Loading Syntax...
-      </div>
-    );
-  }
-
-  if (!user && !isGuest) {
-    return (
-      <LandingPage
-        isGuest={false}
-        onGuestSession={startGuestSession}
-        onAuthenticated={(authenticatedUser) => {
-          setAuthError(false);
-          setIsGuest(false);
-          setUser(authenticatedUser);
-          // Trigger session start after auth
-          setShouldStartSession(true);
-        }}
-      />
-    );
-  }
-
   const handleStart = () => {
     startSession(isGuest ? { guest: true } : undefined);
   };
@@ -297,10 +259,42 @@ export function VoiceTutor() {
     disconnect();
   };
 
+  const handleSignIn = async (authenticatedUser: { email: string; id: string; createdAt: string }) => {
+    setShowSignInModal(false);
+    setIsGuest(false);
+    setUser(authenticatedUser);
+    const parsedId = parseInt(authenticatedUser.id, 10);
+    if (!isNaN(parsedId)) {
+      setUserId(parsedId);
+    }
+    // Session will auto-restart with authenticated user via useEffect
+  };
+
+  const handleSignOut = async () => {
+    disconnect();
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setIsGuest(false);
+    setUser(null);
+    setUserId(null);
+    setCurrentChatId(null);
+    hasInitializedChatRef.current = false;
+    authCheckedRef.current = false;
+  };
+
+  // Show landing page if not guest and not authenticated (first visit)
+  if (!user && !isGuest) {
+    return (
+      <LandingPage
+        onGuestSession={startGuestSession}
+        onAuthenticated={handleSignIn}
+      />
+    );
+  }
+
   return (
     <div className="relative flex h-full min-h-screen bg-terminal-bg">
-      {/* Sidebar */}
-      {!isGuest && (
+      {/* Sidebar - only for authenticated users */}
+      {user && (
         <Sidebar
           userId={userId || 0}
           currentChatId={currentChatId}
@@ -313,33 +307,35 @@ export function VoiceTutor() {
           onPathChange={handlePathChange}
           onDocumentReady={handleDocumentReady}
           onOpenPdfViewer={openPdfViewer}
-          isGuest={isGuest}
+          isGuest={false}
           isOpen={sidebarOpen}
         />
       )}
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 lg:pl-[20rem]">
+      <main className={`flex-1 flex flex-col min-w-0 ${user ? 'lg:pl-[20rem]' : ''}`}>
         {/* Mobile sidebar toggle */}
-        <div className="lg:hidden p-3 border-b border-terminal-border bg-terminal-surface">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
-            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-            aria-expanded={sidebarOpen}
-          >
-            {sidebarOpen ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            )}
-          </button>
-        </div>
+        {user && (
+          <div className="lg:hidden p-3 border-b border-terminal-border bg-terminal-surface">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="flex items-center justify-center w-11 h-11 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+              aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+              aria-expanded={sidebarOpen}
+            >
+              {sidebarOpen ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Header */}
         <header className="flex items-center justify-between gap-3 p-3 sm:p-4 border-b border-terminal-border bg-terminal-surface/50 sticky top-0 z-10">
@@ -349,7 +345,7 @@ export function VoiceTutor() {
             <span className="text-xs text-terminal-muted hidden sm:inline">learn to code, out loud</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            {!isGuest && user && (
+            {user && (
               <span className="hidden md:inline text-xs text-terminal-muted truncate max-w-[200px]" title={user.email}>
                 {user.email}
               </span>
@@ -357,7 +353,7 @@ export function VoiceTutor() {
             <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
             <button
               type="button"
-              onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
+              onClick={handleSignOut}
               className="px-3 py-2 rounded-lg text-xs font-mono text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
             >
               {isGuest ? 'Exit guest' : 'Sign out'}
@@ -367,6 +363,29 @@ export function VoiceTutor() {
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden p-3 sm:p-4 space-y-4 min-h-0">
+          {/* Guest banner - Sign in to save */}
+          {isGuest && (
+            <div className="mx-3 mb-2 p-3 rounded-xl border border-delta-blue-500/30 bg-delta-blue-500/5 animate-slide-down">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-delta-blue-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7V4m0 0L8 12l8 8 8-8-8-8zm0 4v10" />
+                  </svg>
+                  <span className="text-xs font-mono text-delta-blue-200 truncate">
+                    Guest session — conversations are not saved.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSignInModal(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono text-delta-blue-300 bg-delta-blue-500/10 border border-delta-blue-500/30 hover:bg-delta-blue-500/20 hover:border-delta-blue-400 transition-colors focus-visible:ring-2 focus-visible:ring-delta-blue-400 whitespace-nowrap"
+                >
+                  Sign in to save
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Visualizer */}
           <div className="flex justify-center">
             <VoiceVisualizer isActive={isRecording} />
@@ -409,25 +428,14 @@ export function VoiceTutor() {
           )}
         </div>
 
-        {/* Guest banner */}
-        {isGuest && (
-          <div className="mx-3 mb-3 p-3 rounded-xl border border-delta-blue-500/30 bg-delta-blue-500/5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-delta-blue-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7V4m0 0L8 12l8 8 8-8-8-8zm0 4v10" />
-                </svg>
-                <span className="text-xs font-mono text-delta-blue-200 truncate">
-                  Guest session — conversations are not saved.
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={async () => { disconnect(); await fetch('/api/auth/logout', { method: 'POST' }); setIsGuest(false); setUser(null); }}
-                className="text-xs font-mono text-delta-blue-300 hover:text-delta-blue-100 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-delta-blue-400 rounded"
-              >
-                Sign in
-              </button>
+        {/* Sign in modal for guest users */}
+        {showSignInModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <div className="w-full max-w-md animate-slide-up">
+              <AuthPanel
+                onAuthenticated={handleSignIn}
+                onGuest={() => {}}
+              />
             </div>
           </div>
         )}
