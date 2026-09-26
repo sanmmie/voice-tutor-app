@@ -5,7 +5,7 @@ import { Logo } from './Logo';
 import { AuthPanel } from './AuthPanel';
 
 interface LandingPageProps {
-  onGuestSession: () => void;
+  onGuestSession: (initialPrompt?: string) => void;
   onAuthenticated: (user: { email: string; id: string; createdAt: string }) => void;
 }
 
@@ -36,6 +36,10 @@ function ArrowRightIcon({ className = 'h-5 w-5' }: { className?: string }) {
 
 export function LandingPage({ onGuestSession, onAuthenticated }: LandingPageProps) {
   const [showAuth, setShowAuth] = useState(false);
+
+  const handlePromptClick = (prompt: string) => {
+    onGuestSession(prompt);
+  };
 
   return (
     <div className="min-h-screen bg-terminal-bg flex flex-col">
@@ -79,7 +83,7 @@ export function LandingPage({ onGuestSession, onAuthenticated }: LandingPageProp
           <div className="space-y-3 pt-4">
             <button
               type="button"
-              onClick={onGuestSession}
+              onClick={() => handlePromptClick('')}
               className="inline-flex items-center justify-center gap-2 px-10 py-4 rounded-xl bg-terminal-accent text-terminal-bg font-mono text-lg font-semibold hover:bg-terminal-accentDim transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg w-full sm:w-auto"
             >
               <SparklesIcon className="h-6 w-6" />
@@ -126,7 +130,7 @@ export function LandingPage({ onGuestSession, onAuthenticated }: LandingPageProp
                 <button
                   key={i}
                   type="button"
-                  onClick={onGuestSession}
+                  onClick={() => handlePromptClick(prompt)}
                   className="px-4 py-2 text-sm font-mono text-terminal-muted bg-terminal-surface/50 border border-terminal-border rounded-lg hover:border-terminal-accent hover:text-terminal-text hover:bg-terminal-bg transition-colors"
                 >
                   {prompt}
@@ -140,7 +144,7 @@ export function LandingPage({ onGuestSession, onAuthenticated }: LandingPageProp
       {/* Footer */}
       <footer className="border-t border-terminal-border bg-terminal-surface/50 py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-terminal-muted">
-          <p>By continuing, you agree to our <a href="#" className="underline hover:text-terminal-accent">Terms</a> and <a href="#" className="underline hover:text-terminal-accent">Privacy Policy</a>.</p>
+          <p>By continuing, you agree to our <a href="/terms" className="underline hover:text-terminal-accent">Terms</a> and <a href="/privacy" className="underline hover:text-terminal-accent">Privacy Policy</a>.</p>
         </div>
       </footer>
 
@@ -153,7 +157,7 @@ export function LandingPage({ onGuestSession, onAuthenticated }: LandingPageProp
                 onAuthenticated(user);
                 setShowAuth(false);
               }}
-              onGuest={onGuestSession}
+              onGuest={() => handlePromptClick('')}
             />
           </div>
         </div>

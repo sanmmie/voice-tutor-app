@@ -12,6 +12,24 @@ import { Logo } from './Logo';
 import { Sidebar } from './Sidebar';
 import { PDFViewer } from './PDFViewer';
 import { LandingPage } from './LandingPage';
+import { useTheme } from '@/components/ThemeProvider';
+
+// Theme toggle icons - defined at module level to avoid re-creation on render
+function SunIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1m-16 0h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  );
+}
+
+function MoonIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+    </svg>
+  );
+}
 
 export function VoiceTutor() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
@@ -20,6 +38,7 @@ export function VoiceTutor() {
   const [userId, setUserId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSignInModal, setShowSignInModal] = useState(false);
+  const [initialPrompt, setInitialPrompt] = useState<string>('');
   const [learningLevel, setLearningLevel] = useState<'entry' | 'basic' | 'intermediate' | 'advanced'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('syntax_learning_level') as 'entry' | 'basic' | 'intermediate' | 'advanced') || 'basic';
@@ -34,23 +53,17 @@ export function VoiceTutor() {
   });
   const [pdfViewer, setPdfViewer] = useState<{ src: string; fileName: string } | null>(null);
 
-  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording } = useVoiceAgent({
+  const { state, startSession, disconnect, setTranscripts, isConnected, isRecording, sendTextInput } = useVoiceAgent({
     learningLevel,
     learningPath,
     isGuest,
   });
 
+  const { theme, toggleTheme } = useTheme();
+
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedChatRef = useRef(false);
   const authCheckedRef = useRef(false);
-
-  // Persist learning settings to localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('syntax_learning_level', learningLevel);
-      localStorage.setItem('syntax_learning_path', learningPath);
-    }
-  }, [learningLevel, learningPath]);
 
   // Check auth status in background (non-blocking)
   useEffect(() => {
@@ -84,6 +97,14 @@ export function VoiceTutor() {
       controller.abort();
     };
   }, [isGuest]);
+
+  // Send initial prompt when session connects
+  useEffect(() => {
+    if (initialPrompt && (isConnected || isRecording)) {
+      sendTextInput?.(initialPrompt);
+      setInitialPrompt(''); // eslint-disable-line react-hooks/set-state-in-effect
+    }
+  }, [initialPrompt, isConnected, isRecording, sendTextInput]);
 
   const createNewChat = useCallback(async () => {
     if (!userId) return;
@@ -238,8 +259,9 @@ export function VoiceTutor() {
     setPdfViewer({ src, fileName });
   }, []);
 
-  const startGuestSession = useCallback(async () => {
+  const startGuestSession = useCallback(async (prompt?: string) => {
     setIsGuest(true);
+    if (prompt) setInitialPrompt(prompt);
     await startSession({ guest: true });
   }, [startSession]);
 
@@ -342,6 +364,14 @@ export function VoiceTutor() {
               </span>
             )}
             <StatusBar status={state.status} error={state.error} sessionId={state.sessionId} />
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-lg text-terminal-muted hover:text-terminal-accent hover:bg-terminal-bg transition-colors focus-visible:ring-2 focus-visible:ring-terminal-accent"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+            </button>
             <button
               type="button"
               onClick={handleSignOut}

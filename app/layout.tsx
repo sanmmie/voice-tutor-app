@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { ThemeProvider } from '@/components/ThemeProvider';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -17,7 +18,7 @@ export const metadata: Metadata = {
     type: 'website',
   },
   other: {
-    'color-scheme': 'dark',
+    'color-scheme': 'dark light',
   },
   icons: {
     icon: '/favicon.svg',
@@ -39,9 +40,11 @@ export default function RootLayout({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
-        <main id="main-content" className="flex-1 min-h-screen w-full">
-          {children}
-        </main>
+        <ThemeProvider>
+          <main id="main-content" className="flex-1 min-h-screen w-full">
+            {children}
+          </main>
+        </ThemeProvider>
       </body>
     </html>
   );

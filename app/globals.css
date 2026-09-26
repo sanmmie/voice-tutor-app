@@ -4,11 +4,60 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---------- Reset ----------
-   A minimal reset that deliberately does NOT zero margins/padding on
-   headings/lists (the previous `* { margin:0; padding:0 }` stripped Tailwind's
-   preflight and forced every element to carry explicit utility margins,
-   which is fragile and already inconsistent across components). */
+/* ---------- CSS Custom Properties for Theming ---------- */
+:root {
+  /* Dark mode (default) */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #11111a;
+  --bg-tertiary: #1a1a28;
+  --bg-surface: #14141f;
+  --text-primary: #e8e8ed;
+  --text-secondary: #a0a0b0;
+  --text-muted: #6a6a7a;
+  --accent: #6ee7b7;
+  --accent-dim: #5ad3a0;
+  --border: #2a2a3a;
+  --border-hover: #3a3a4a;
+  --card-bg: rgba(20, 20, 31, 0.6);
+  --card-border: #2a2a3a;
+  --input-bg: #1a1a28;
+  --scrollbar-thumb: #2a2a3a;
+  --scrollbar-thumb-hover: #4a4a5a;
+  --guest-banner-bg: rgba(59, 130, 246, 0.05);
+  --guest-banner-border: rgba(59, 130, 246, 0.3);
+  --guest-banner-text: #93c5fd;
+  --guest-banner-icon: #60a5fa;
+  --header-bg: rgba(20, 20, 31, 0.5);
+  --shadow: rgba(0, 0, 0, 0.3);
+}
+
+/* Light mode */
+html.light {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-surface: #ffffff;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent: #059669;
+  --accent-dim: #047857;
+  --border: #e2e8f0;
+  --border-hover: #cbd5e1;
+  --card-bg: rgba(255, 255, 255, 0.8);
+  --card-border: #e2e8f0;
+  --input-bg: #f1f5f9;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+  --guest-banner-bg: rgba(59, 130, 246, 0.1);
+  --guest-banner-border: rgba(59, 130, 246, 0.4);
+  --guest-banner-text: #2563eb;
+  --guest-banner-icon: #3b82f6;
+  --header-bg: rgba(255, 255, 255, 0.8);
+  --shadow: rgba(0, 0, 0, 0.1);
+}
+
+/* ---------- Reset ---------- */
 * {
   box-sizing: border-box;
 }
@@ -40,10 +89,12 @@ body {
 }
 
 body {
-  background: #0a0a0f;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* ---------- Focus visibility ----------
@@ -53,7 +104,7 @@ body {
    Firefox and Safari do not support it, so the fallback below uses the
    forced-colors media query (supported in all modern browsers) instead. */
 :focus-visible {
-  outline: 2px solid #6ee7b7;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -64,12 +115,10 @@ body {
   }
 }
 
-/* ---------- Scrollbar ----------
-   The previous 4px `-webkit-only` scrollbar was invisible on Firefox/Edge
-   and too thin to be a usable touch target on mobile. */
+/* ---------- Scrollbar ---------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2a3a transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -82,12 +131,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a3a;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4a5a;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ---------- DeltaOS Core logo glow ----------
@@ -105,15 +154,21 @@ body {
 /* ---------- Component layer ----------
    Reusable card/surface primitives so components don't drift. */
 .card {
-  @apply bg-terminal-surface/60 border border-terminal-border rounded-xl;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 0.75rem;
 }
 
 .card-elevated {
-  @apply bg-terminal-surface/80 border border-terminal-border rounded-xl shadow-lg shadow-black/30;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 15px -3px var(--shadow), 0 4px 6px -2px var(--shadow);
 }
 
 .panel-title {
-  @apply font-mono text-xs uppercase tracking-widest text-terminal-muted;
+  @apply font-mono text-xs uppercase tracking-widest;
+  color: var(--text-muted);
 }
 
 /* ---------- Skip link ----------
@@ -125,8 +180,8 @@ body {
   top: 0;
   z-index: 100;
   padding: 0.75rem 1rem;
-  background: #6ee7b7;
-  color: #0a0a0f;
+  background: var(--accent);
+  color: var(--bg-primary);
   font-weight: 700;
   border-radius: 0 0 8px 0;
   text-decoration: none;
@@ -139,7 +194,7 @@ body {
 /* ---------- Skeleton ----------
    A reusable loading skeleton for the chat list and transcript panel. */
 .skeleton {
-  background: linear-gradient(90deg, #1a1a28 0%, #24243a 50%, #1a1a28 100%);
+  background: linear-gradient(90deg, var(--bg-tertiary) 0%, var(--bg-surface) 50%, var(--bg-tertiary) 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
@@ -220,4 +275,48 @@ body {
 .status-live {
   role: status;
   aria-live: polite;
+}
+
+/* ---------- Terminal color utilities (for Tailwind) ---------- */
+:root {
+  --terminal-bg: var(--bg-primary);
+  --terminal-surface: var(--bg-surface);
+  --terminal-text: var(--text-primary);
+  --terminal-muted: var(--text-muted);
+  --terminal-accent: var(--accent);
+  --terminal-accentDim: var(--accent-dim);
+  --terminal-border: var(--border);
+  --delta-blue-500: #3b82f6;
+  --delta-blue-400: #60a5fa;
+  --delta-blue-300: #93c5fd;
+  --delta-blue-500-10: rgba(59, 130, 246, 0.1);
+  --delta-blue-500-20: rgba(59, 130, 246, 0.2);
+  --delta-blue-500-30: rgba(59, 130, 246, 0.3);
+  --delta-blue-500-40: rgba(59, 130, 246, 0.4);
+  --delta-blue-500-5: rgba(59, 130, 246, 0.05);
+  --delta-blue-500-15: rgba(59, 130, 246, 0.15);
+  --delta-blue-500-50: rgba(59, 130, 246, 0.5);
+  --delta-blue-500-80: rgba(59, 130, 246, 0.8);
+  --red-500: #ef4444;
+  --red-500-10: rgba(239, 68, 68, 0.1);
+  --red-500-20: rgba(239, 68, 68, 0.2);
+  --red-500-30: rgba(239, 68, 68, 0.3);
+  --red-500-40: rgba(239, 68, 68, 0.4);
+  --red-500-50: rgba(239, 68, 68, 0.5);
+  --red-500-60: rgba(239, 68, 68, 0.6);
+  --emerald-500: #10b981;
+  --emerald-500-10: rgba(16, 185, 129, 0.1);
+  --emerald-500-20: rgba(16, 185, 129, 0.2);
+  --amber-500: #f59e0b;
+  --amber-500-10: rgba(245, 158, 11, 0.1);
+  --amber-500-20: rgba(245, 158, 11, 0.2);
+  --blue-500: #3b82f6;
+  --blue-500-10: rgba(59, 130, 246, 0.1);
+  --blue-500-20: rgba(59, 130, 246, 0.2);
+  --purple-500: #a855f7;
+  --purple-500-10: rgba(168, 85, 247, 0.1);
+  --purple-500-20: rgba(168, 85, 247, 0.2);
+  --green-500: #22c55e;
+  --green-500-10: rgba(34, 197, 94, 0.1);
+  --green-500-20: rgba(34, 197, 94, 0.2);
 }
